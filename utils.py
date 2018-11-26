@@ -38,43 +38,70 @@ def download_img_mask(coord):
     
     return img, mask
 
+def _get_relav_dist(neighbor_coord):
+    return (neighbor_coord[0] - 1, neighbor_coord[1] - 1)
+    
+
 def _get_next_point(skel, current_point, prev_point=None):
     
     upper_limit = current_point[0]-1
-    bottom_limit = current_point[0]+2
+    bottom_limit = current_point[0]+1
     left_limit = current_point[1]-1
-    right_limit = current_point[1]+2
-    neighbors = skel[upper_limit:bottom_limit, left_limit:right_limit]
-    
-    neighbors_coord = zip(np.where(neighbors))
-    pdb.set_trace()
+    right_limit = current_point[1]+1
+    neighbors = skel[upper_limit:bottom_limit+1, left_limit:right_limit+1]
+    y, x = np.where(neighbors)
+    neighbors_coord = zip(y,x)
+    #neighbors_coord = [np.array(point) for point in zip(y,x)]
+    #pdb.set_trace()
+    if prev_point:
+        relav_dist = _get_relav_dist(prev_point)
+        prev_point = (1 - relav_dist[0], 1 - relav_dist[1])
     neighbors_coord = [point_coord for point_coord in neighbors_coord if point_coord not in [(1,1), prev_point]]
-    pdb.set_trace()
-    next_point = neighbors_coord[min(cdist([(1,1)], neighbors_coord))]
-    return next_point[0] - 1, next_point[0] - 1
+    #pdb.set_trace()
+    next_point = neighbors_coord[np.argmin(cdist([(1,1)], neighbors_coord))]
+    return next_point
     
 
 def sort_skeleton(skel):
     
     skel_labeled, num_labels = measure.label(skel, connectivity=2, return_num=True)
     sorted_coord_labels = []
-    
+
     for i in range(num_labels):
+        #print "Entro"
         
         skel_cc = (skel_labeled == (i+1))
         
         _, ep = detect_br_ep(skel_cc)
         ep_y, ep_x = np.where(ep)
         ep_coords = zip(ep_y, ep_x)
+        
         sorted_coord = []
         sorted_coord.append(ep_coords[0])
-        next_point = _get_next_point(skel_cc, sorted_coord[-1])
+        #print sorted_coord[-1]
+        _next_point = _get_next_point(skel_cc, sorted_coord[-1])
+        relav_dist = _get_relav_dist(_next_point)
+        next_point = (sorted_coord[-1][0] + relav_dist[0], sorted_coord[-1][1] + relav_dist[1])
         sorted_coord.append(next_point)
-        while sorted_coord[-1] == ep_coords[1]:
-            next_point = _get_next_point(skel, sorted_coord[-1], sorted_coord[-2])
-            
+        #print sorted_coord[-1]
+        
+        while next_point != ep_coords[1]:
+             
+            current_point = next_point
+            _next_point = _get_next_point(skel_cc, current_point, _next_point)
+            relav_dist = _get_relav_dist(_next_point)
+            next_point = (current_point[0] + relav_dist[0], current_point[1] + relav_dist[1])
             sorted_coord.append(next_point)
-            
+            #print sorted_coord[-1]
+        
+        new_skel_cc = np.zeros(skel_cc.shape,dtype=bool)
+        new_skel_cc[zip(*sorted_coord)] = True
+        pdb.set_trace()
+        plt.figure()
+        plt.imshow(new_skel_cc)
+        plt.figure()
+        plt.imshow(skel_cc)
+        plt.show()
         sorted_coord_labels.append(sorted_coord)
         
     return sorted_coord_labels
@@ -85,8 +112,7 @@ def test_sort_skeleton():
                      [0,0,0,1,0],
                      [0,1,0,0,1],
                      [0,0,1,1,0],
-                     [0,0,0,0,0]])
-    
+                     [0,0,0,0,0]], dtype=bool)
     sorted_points = sort_skeleton(skel)
     pdb.set_trace()
     print "Fin"
@@ -138,7 +164,6 @@ def detect_br_ep(sk):
     
     return br, ep
     
-test_sort_skeleton()
 
 #def skeleton_endpoints(skel):
     ## make out input nice, possibly necessary
@@ -184,8 +209,8 @@ test_sort_skeleton()
 
     
 
-#img, mask = download_img_mask(coord)
-#mask = mask[:1200,:]
+img, mask = download_img_mask(coord)
+mask = mask[:1200,:]
 
 #plt.figure()
 #plt.imshow(img)
@@ -201,16 +226,20 @@ test_sort_skeleton()
 #plt.imshow(skeleton)
 
 
-#skeleton = morphology.medial_axis(mask == 255)
+skeleton = morphology.medial_axis(mask == 255)
 
-#plt.figure()
-#plt.imshow(skeleton)
+skeleton[0,:] = 0
+skeleton[-1,:] = 0
+skeleton[:,0] = 0
+skeleton[:,-1] = 0
+
+skleton_points = sort_skeleton(skeleton)
+print skleton_points[0][:10]
+plt.figure()
+plt.imshow(skeleton)
+plt.show()
 
 
-#skeleton[0,:] = 0
-#skeleton[-1,:] = 0
-#skeleton[:,0] = 0
-#skeleton[:,-1] = 0
 
 #fig,ax = plt.subplots(1)
 #ax.imshow(skeleton)
