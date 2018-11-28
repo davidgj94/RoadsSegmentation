@@ -15,6 +15,7 @@ from matplotlib.patches import Circle
 import mahotas as mah
 from skimage import measure
 from scipy.spatial.distance import cdist
+import math
 
 
 base_URL = "https://maps.googleapis.com/maps/api/staticmap?key=AIzaSyDvgF0JSBrlYLDzY7pPqtcBSgGslmaAlzw&zoom=19&format=png&maptype=roadmap&style=color:0x000000&style=element:labels%7Cvisibility:off&style=feature:road%7Celement:geometry%7Ccolor:0xffffff%7Cvisibility:on&style=feature:road.highway%7Celement:geometry%7Ccolor:0xffffff%7Cvisibility:on&style=feature:road.local%7Celement:geometry%7Cvisibility:off&size=640x640&scale=2"
@@ -40,6 +41,93 @@ def download_img_mask(coord):
 
 def _get_relav_dist(neighbor_coord):
     return (neighbor_coord[0] - 1, neighbor_coord[1] - 1)
+
+def _get_angle(p1, p2):
+    xx = (p1[1], p2[1])
+    yy = (p1[0], p2[0])
+    a = float(xx[0] - xx[1])
+    b = float(yy[0] - yy[1])
+    angle = math.degrees(math.atan(b/a))
+    return angle
+
+def _get_midpoint(p1, p2):
+    xx = (p1[1], p2[1])
+    yy = (p1[0], p2[0])
+    x_midpoint = (xx[0] + xx[1])/2
+    y_midpoint = (yy[0] + yy[1])/2
+    return y_midpoint, x_midpoint
+
+
+def divide_skel(coords, D=50, M=200, thresh=5, min_height=100):
+    
+    ref_index = 0
+    angles = []
+    sections_start = [coords[M]]
+    section_mid_points = []
+    section_angles = []
+    section_height = []
+    
+    def _add_new_section(new_point):
+        
+        sections_start.append(coords[center_index])
+        p1, p2 = sections_start[-2], sections_start[-1]
+        
+        height = int(cdist([p1], [p2]))
+        if height > min_height:
+            section_mid_points.append(_get_midpoint(p1, p2))
+            section_angles.append(_get_angle(p1, p2))
+            section_height.append(height)
+        else:
+            sections_start.pop()
+
+    for center_index in range(M, (len(coords) - 1) - M, D):
+        angle = _get_angle(coords[center_index - D], coords[center_index + D])
+        angles.append(angle)
+        if (angle - angles[ref_index]) > thresh:
+            ref_index = len(angles) - 1
+            _add_new_section(coords[center_index])
+            
+    _add_new_section(coords[center_index])
+            
+    return section_mid_points, section_angles, section_height, angles
+
+
+def extract_section(img, center, angle, height, width=200):
+    
+    img_h, img_w = img.shape[:2]
+    M = cv2.getRotationMatrix2D(center[::-1], angle - 90, 1.0)
+    rotated = cv2.warpAffine(img, M, (img_h, img_w), cv2.INTER_NEAREST)
+    circ1 = Circle(center[::-1],20)
+    circ2 = Circle(center[::-1],20)
+    circ3 = Circle(center[::-1],20)
+    fig1,ax1 = plt.subplots(1)
+    ax1.imshow(img)
+    ax1.add_patch(circ1)
+    fig2,ax2 = plt.subplots(1)
+    ax2.imshow(rotated)
+    ax2.add_patch(circ2)
+    crop = cv2.getRectSubPix(rotated, (width, height), center[::-1])
+    fig1,ax3 = plt.subplots(1)
+    ax3.imshow(crop)
+    
+    toltal_mask = paste_mask(np.zeros(img.shape).astype(bool), crop, center, angle)
+    ax3.imshow(toltal_mask)
+    ax3.add_patch(circ3)
+    plt.show()
+    
+    return crop
+
+def paste_mask(total_mask, mask, center, angle):
+    
+    H, W = mask.shape
+    y, x = np.where(mask)
+    y += center[0] - H / 2
+    x += center[1] - W / 2
+    coords = np.array(zip(x, y, np.ones(x.shape, dtype=int)))
+    M = cv2.getRotationMatrix2D(center[::-1], 90 - angle, 1.0)
+    new_coords = M.dot(coords.T)
+    total_mask[new_coords[1,:].astype(int), new_coords[0,:].astype(int)] = True
+    return total_mask
     
 
 def _get_next_point(skel, current_point, prev_point=None):
@@ -48,29 +136,33 @@ def _get_next_point(skel, current_point, prev_point=None):
     bottom_limit = current_point[0]+1
     left_limit = current_point[1]-1
     right_limit = current_point[1]+1
+    
     neighbors = skel[upper_limit:bottom_limit+1, left_limit:right_limit+1]
     y, x = np.where(neighbors)
     neighbors_coord = zip(y,x)
-    #neighbors_coord = [np.array(point) for point in zip(y,x)]
-    #pdb.set_trace()
+
     if prev_point:
         relav_dist = _get_relav_dist(prev_point)
         prev_point = (1 - relav_dist[0], 1 - relav_dist[1])
+        
     neighbors_coord = [point_coord for point_coord in neighbors_coord if point_coord not in [(1,1), prev_point]]
-    #pdb.set_trace()
+    
     next_point = neighbors_coord[np.argmin(cdist([(1,1)], neighbors_coord))]
+    
     return next_point
     
 
-def sort_skeleton(skel):
+def sort_skeleton(skel, img, min_num_points=500):
     
     skel_labeled, num_labels = measure.label(skel, connectivity=2, return_num=True)
     sorted_coord_labels = []
 
     for i in range(num_labels):
-        #print "Entro"
         
         skel_cc = (skel_labeled == (i+1))
+        
+        if len(np.where(skel_cc)[0]) < min_num_points:
+            continue
         
         _, ep = detect_br_ep(skel_cc)
         ep_y, ep_x = np.where(ep)
@@ -78,12 +170,10 @@ def sort_skeleton(skel):
         
         sorted_coord = []
         sorted_coord.append(ep_coords[0])
-        #print sorted_coord[-1]
         _next_point = _get_next_point(skel_cc, sorted_coord[-1])
         relav_dist = _get_relav_dist(_next_point)
         next_point = (sorted_coord[-1][0] + relav_dist[0], sorted_coord[-1][1] + relav_dist[1])
         sorted_coord.append(next_point)
-        #print sorted_coord[-1]
         
         while next_point != ep_coords[1]:
              
@@ -92,16 +182,15 @@ def sort_skeleton(skel):
             relav_dist = _get_relav_dist(_next_point)
             next_point = (current_point[0] + relav_dist[0], current_point[1] + relav_dist[1])
             sorted_coord.append(next_point)
-            #print sorted_coord[-1]
+            
+        section_mid_points, section_angles, section_height, angles = divide_skel(sorted_coord)
+        extract_section(skel_cc.astype(np.uint8), section_mid_points[0], section_angles[0], section_height[0])
         
-        new_skel_cc = np.zeros(skel_cc.shape,dtype=bool)
-        new_skel_cc[zip(*sorted_coord)] = True
-        pdb.set_trace()
-        plt.figure()
-        plt.imshow(new_skel_cc)
-        plt.figure()
-        plt.imshow(skel_cc)
-        plt.show()
+        for index, _ in enumerate(section_mid_points):
+            extract_section(img, section_mid_points[index], section_angles[index], section_height[index])
+        
+        divide_skel(coords)
+        extract_section(img, center, angle, height, width=200)
         sorted_coord_labels.append(sorted_coord)
         
     return sorted_coord_labels
@@ -163,68 +252,12 @@ def detect_br_ep(sk):
     ep = ep1 + ep2 + ep3 + ep4 + ep5 + ep6 + ep7 + ep8 + ep9
     
     return br, ep
-    
 
-#def skeleton_endpoints(skel):
-    ## make out input nice, possibly necessary
-    #skel = skel.copy()
-    #skel[skel!=0] = 1
-    #skel = np.uint8(skel)
 
-    ## apply the convolution
-    #kernel = np.uint8([[1,  1, 1],
-                       #[1, 10, 1],
-                       #[1,  1, 1]])
-    #src_depth = -1
-    #filtered = cv2.filter2D(skel,src_depth,kernel)
-
-    ## now look through to find the value of 11
-    ## this returns a mask of the endpoints, but if you just want the coordinates, you could simply return np.where(filtered==11)
-    ##out = np.zeros_like(skel)
-    ##out[np.where(filtered==11)] = 1
-    #return np.where(filtered==11)
-
-#def get_skeleton_graph(X):
-    
-    #G = nx.Graph()  # A graph to hold the nearest neighbours
-
-    #tree = KDTree(X, leaf_size=2, metric='euclidean')  # Create a distance tree
-
-    ## Now loop over your points and find the two nearest neighbours
-    ## If the first and last points are also the start and end points of the line you can use X[1:-1]
-    #for p in X:
-        #dist, ind = tree.query(p, k=3)
-
-        ## ind Indexes represent nodes on a graph
-        ## Two nearest points are at indexes 1 and 2. 
-        ## Use these to form edges on graph
-        ## p is the current point in the list
-        #G.add_node(p)
-        #n1, l1 = X[ind[0][1]], dist[0][1]  # The next nearest point
-        #n2, l2 = X[ind[0][2]], dist[0][2]  # The following nearest point  
-        #G.add_edge(p, n1)
-        #G.add_edge(p, n2)
-        
-    #return G
-
-    
 
 img, mask = download_img_mask(coord)
 mask = mask[:1200,:]
-
-#plt.figure()
-#plt.imshow(img)
-
-#plt.figure()
-#plt.imshow(mask)
-
-
-##pdb.set_trace()
-#skeleton = morphology.skeletonize(mask == 255)
-
-#plt.figure()
-#plt.imshow(skeleton)
-
+img = img[:1200,:]
 
 skeleton = morphology.medial_axis(mask == 255)
 
@@ -233,44 +266,11 @@ skeleton[-1,:] = 0
 skeleton[:,0] = 0
 skeleton[:,-1] = 0
 
-skleton_points = sort_skeleton(skeleton)
-print skleton_points[0][:10]
 plt.figure()
 plt.imshow(skeleton)
 plt.show()
 
-
-
-#fig,ax = plt.subplots(1)
-#ax.imshow(skeleton)
-
-##y, x = skeleton_endpoints(skeleton)
-
-#br, ep = detect_br_ep(skeleton)
-
-#y, x = np.where(ep)
-
-#for xx,yy in zip(x,y):
-    #circ = Circle((xx,yy),20)
-    #ax.add_patch(circ)
-
-##skeleton_list = np.where(skeleton > 0)
-##pdb.set_trace()
-##get_skeleton_graph(skeleton_list)
-
-## Display the image and plot all contours found
-#fig, ax = plt.subplots()
-#ax.imshow(skeleton, interpolation='nearest', cmap=plt.cm.gray)
-#contours = measure.find_contours(skeleton, 0)
-#for n, contour in enumerate(contours):
-    #ax.plot(contour[:, 1], contour[:, 0], linewidth=2)
-
-#ax.axis('image')
-#ax.set_xticks([])
-#ax.set_yticks([])
-#plt.show()
-
-#plt.show()
+skleton_points = sort_skeleton(skeleton, img)
         
 
             

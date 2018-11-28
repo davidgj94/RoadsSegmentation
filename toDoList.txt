@@ -1,4 +1,4 @@
 Ramer–Douglas–Peucker algorithm (opencv approxPolyDP)
 Sklansky's algorithm (opencv convexHull)
-arreglando _get_next_point porque np.where devuelve tupla en vez de lista y el zip no funciona
+arreglando _get_next_point porque np.where devuelve tupla en vez de lista y el zip no funciona -> funciona
 
