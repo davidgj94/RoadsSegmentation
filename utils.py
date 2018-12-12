@@ -57,6 +57,27 @@ def _get_midpoint(p1, p2):
     y_midpoint = (yy[0] + yy[1])/2
     return y_midpoint, x_midpoint
 
+def get_padding(sz):
+    
+    pad_amount = int(ceil(float(sz) / 32) * 32 - sz)
+    
+    if pad_amount % 2:
+        
+        padding = (pad_amount / 2 , pad_amount - pad_amount / 2)
+    else:
+        padding = (pad_amount / 2, pad_amount / 2)
+        
+return padding
+
+def pad_img(img, pad_value=0):
+
+    height, width = img.shape[:2]
+    x_pad = get_padding(width)
+    y_pad = get_padding(height)
+    img_padded = cv2.copyMakeBorder(down_img, y_pad[0], y_pad[1], x_pad[0], x_pad[1], cv2.BORDER_CONSTANT, value=[pad_value, pad_value, pad_value])
+    return img_padded
+
+
 
 def divide_skel(coords, D=50, M=200, thresh=5, min_height=100):
     
