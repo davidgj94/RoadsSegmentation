@@ -16,7 +16,37 @@ import mahotas as mah
 from skimage import measure
 from scipy.spatial.distance import cdist
 import math
+from math import ceil
+from scipy.ndimage.morphology import binary_fill_holes
+import vis
 
+caffe_root = "/home/davidgj/projects_v2/caffe-segnet-cudnn5/"
+
+
+sys.path.insert(0, caffe_root + 'python')
+
+import caffe; caffe.set_mode_gpu()
+
+prototxt = "/home/davidgj/projects_v2/SegNet-Tutorial/Models/roads/inference_video.prototxt"
+caffemodel = "/home/davidgj/projects_v2/SegNet-Tutorial/Models/Inference/roads/snapshot_iter_1500/test_weights.caffemodel"
+net = caffe.Net(prototxt, caffemodel, caffe.TEST)
+
+def road_segmentation(img):
+
+    img = img[...,::-1]
+    img = img.transpose((2,0,1))
+    img = img[np.newaxis,...]
+    print img.shape
+
+    net.blobs['data'].reshape(*img.shape)
+    net.blobs['data'].data[...] = img
+
+    net.forward()
+
+    predicted = np.squeeze(net.blobs['prob'].data)
+    ind = np.argmax(predicted, axis=0)
+
+    return ind
 
 base_URL = "https://maps.googleapis.com/maps/api/staticmap?key=AIzaSyDvgF0JSBrlYLDzY7pPqtcBSgGslmaAlzw&zoom=19&format=png&maptype=roadmap&style=color:0x000000&style=element:labels%7Cvisibility:off&style=feature:road%7Celement:geometry%7Ccolor:0xffffff%7Cvisibility:on&style=feature:road.highway%7Celement:geometry%7Ccolor:0xffffff%7Cvisibility:on&style=feature:road.local%7Celement:geometry%7Cvisibility:off&size=640x640&scale=2"
 
@@ -57,25 +87,25 @@ def _get_midpoint(p1, p2):
     y_midpoint = (yy[0] + yy[1])/2
     return y_midpoint, x_midpoint
 
-def get_padding(sz):
+def get_padding(sz, sz_):
     
-    pad_amount = int(ceil(float(sz) / 32) * 32 - sz)
+    #pad_amount = int(ceil(float(sz) / 32) * 32 - sz)
+    pad_amount = sz_ - sz
     
     if pad_amount % 2:
-        
         padding = (pad_amount / 2 , pad_amount - pad_amount / 2)
     else:
         padding = (pad_amount / 2, pad_amount / 2)
         
-return padding
+    return padding
 
 def pad_img(img, pad_value=0):
 
     height, width = img.shape[:2]
-    x_pad = get_padding(width)
-    y_pad = get_padding(height)
-    img_padded = cv2.copyMakeBorder(down_img, y_pad[0], y_pad[1], x_pad[0], x_pad[1], cv2.BORDER_CONSTANT, value=[pad_value, pad_value, pad_value])
-    return img_padded
+    x_pad = get_padding(width, 224)
+    y_pad = get_padding(height, 384)
+    img_padded = cv2.copyMakeBorder(img, y_pad[0], y_pad[1], x_pad[0], x_pad[1], cv2.BORDER_CONSTANT, value=[pad_value, pad_value, pad_value])
+    return img_padded, x_pad, y_pad
 
 
 
@@ -118,23 +148,25 @@ def extract_section(img, center, angle, height, width=200):
     img_h, img_w = img.shape[:2]
     M = cv2.getRotationMatrix2D(center[::-1], angle - 90, 1.0)
     rotated = cv2.warpAffine(img, M, (img_h, img_w), cv2.INTER_NEAREST)
-    circ1 = Circle(center[::-1],20)
-    circ2 = Circle(center[::-1],20)
-    circ3 = Circle(center[::-1],20)
-    fig1,ax1 = plt.subplots(1)
-    ax1.imshow(img)
-    ax1.add_patch(circ1)
-    fig2,ax2 = plt.subplots(1)
-    ax2.imshow(rotated)
-    ax2.add_patch(circ2)
+    # circ1 = Circle(center[::-1],20)
+    # circ2 = Circle(center[::-1],20)
+    # circ3 = Circle(center[::-1],20)
+    # fig1,ax1 = plt.subplots(1)
+    # ax1.imshow(img)
+    # ax1.add_patch(circ1)
+    # fig2,ax2 = plt.subplots(1)
+    # ax2.imshow(rotated)
+    # ax2.add_patch(circ2)
     crop = cv2.getRectSubPix(rotated, (width, height), center[::-1])
-    fig1,ax3 = plt.subplots(1)
-    ax3.imshow(crop)
+    #crop = pad_img(crop)
+    #pdb.set_trace()
+    # fig1,ax3 = plt.subplots(1)
+    # ax3.imshow(crop)
     
-    toltal_mask = paste_mask(np.zeros(img.shape).astype(bool), crop, center, angle)
-    ax3.imshow(toltal_mask)
-    ax3.add_patch(circ3)
-    plt.show()
+    # toltal_mask = paste_mask(np.zeros(img.shape).astype(bool), crop, center, angle)
+    # ax3.imshow(toltal_mask)
+    # ax3.add_patch(circ3)
+    # plt.show()
     
     return crop
 
@@ -205,13 +237,28 @@ def sort_skeleton(skel, img, min_num_points=500):
             sorted_coord.append(next_point)
             
         section_mid_points, section_angles, section_height, angles = divide_skel(sorted_coord)
-        extract_section(skel_cc.astype(np.uint8), section_mid_points[0], section_angles[0], section_height[0])
         
+        toltal_mask = np.zeros(img.shape).astype(bool)
+        toltal_mask = toltal_mask[...,0]
         for index, _ in enumerate(section_mid_points):
-            extract_section(img, section_mid_points[index], section_angles[index], section_height[index])
-        
-        divide_skel(coords)
-        extract_section(img, center, angle, height, width=200)
+            crop = extract_section(img, section_mid_points[index], section_angles[index], section_height[index])
+            crop, pad_x, pad_y = pad_img(crop)
+            mask = road_segmentation(crop)
+            mask = mask[pad_y[0]:-pad_y[1], pad_x[0]:-pad_x[1]]
+            mask = (mask == 1)
+            toltal_mask = paste_mask(toltal_mask, mask, section_mid_points[index], section_angles[index])
+            # pdb.set_trace()
+
+        toltal_mask_ = binary_fill_holes(toltal_mask.astype(int))
+        pdb.set_trace()
+        plt.figure()
+        plt.imshow(vis.vis_seg(img, toltal_mask_.astype(int), vis.make_palette(2)))
+        plt.figure()
+        plt.imshow(toltal_mask.astype(int))
+        plt.figure()
+        plt.imshow(toltal_mask_)
+        plt.show()
+        pdb.set_trace()
         sorted_coord_labels.append(sorted_coord)
         
     return sorted_coord_labels
