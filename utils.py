@@ -264,6 +264,7 @@ def _get_next_point(skel, current_point, prev_point=None):
 def sort_skeleton(skel, img, min_num_points=500):
     
     skel_labeled, num_labels = measure.label(skel, connectivity=2, return_num=True)
+
     sorted_coord_labels = []
 
     for i in range(num_labels):
@@ -273,9 +274,23 @@ def sort_skeleton(skel, img, min_num_points=500):
         if len(np.where(skel_cc)[0]) < min_num_points:
             continue
         
-        _, ep = detect_br_ep(skel_cc)
+        br, ep = detect_br_ep(skel_cc)
         ep_y, ep_x = np.where(ep)
+        br_y, br_x = np.where(br)
         ep_coords = zip(ep_y, ep_x)
+
+        ep_coords_ = zip(ep_x, ep_y)
+        br_coords = zip(br_x, br_y)
+
+        fig, ax = plt.subplots(1)
+        ax.imshow(skel_cc)
+        for ep_i in range(len(ep_coords_)):
+            ax.add_patch(Circle(ep_coords_[ep_i], 10, color='k'))
+
+        for br_i in range(len(br_coords)):
+            ax.add_patch(Circle(br_coords[br_i], 10, color='r'))
+
+        plt.show()
         
         sorted_coord = []
         sorted_coord.append(ep_coords[0])
@@ -293,11 +308,14 @@ def sort_skeleton(skel, img, min_num_points=500):
             sorted_coord.append(next_point)
             
         section_mid_points, section_angles, section_height, angles = divide_skel(sorted_coord)
+        pdb.set_trace()
         
         toltal_mask = np.zeros(img.shape).astype(bool)
         toltal_mask = toltal_mask[...,0]
         for index, _ in enumerate(section_mid_points):
             crop = extract_section(img, section_mid_points[index], section_angles[index], section_height[index])
+            plt.imshow(crop)
+            plt.show()
             crop, pad_x, pad_y = pad_img(crop)
             mask = road_segmentation(crop)
             mask = mask[pad_y[0]:-pad_y[1], pad_x[0]:-pad_x[1]]
@@ -340,8 +358,7 @@ def sort_skeleton(skel, img, min_num_points=500):
                             colineal_points.append(_prop_idx)
                         else:
                             distances.pop()
-
-            final_points = colineal_points         
+    
             final_points = []
 
             colineal_points, distances = (list(t) for t in zip(*sorted(zip(colineal_points, distances), key = lambda x: x[1])))
@@ -385,16 +402,36 @@ def sort_skeleton(skel, img, min_num_points=500):
             #colineal_points = [for ]
 
             #intersect_points = find_intesect_borders(line_coeffs, toltal_mask.shape)
+
+
         pdb.set_trace()
 
         # y0, x0 = props[0]["centroid"]
         # x1, y1 = x0 + 200 * math.cos(props[0]["orientation"] - math.pi/2), y0 + 200 * math.sin(props[0]["orientation"]-math.pi/2)
+        # lane_endpoints = []
+        # for idx in colineal_points_total:
+        #     if len(colineal_points_total[idx]) == 1:
+        #         lane_endpoints.append(idx)
 
-        from PIL import Image, ImageDraw
-        im = Image.fromarray(toltal_mask)
-        draw = ImageDraw.Draw(im) 
-        draw.line([intersect_points[0], intersect_points[1]], fill=1, width=5)
-        plt.imshow(np.array(im))
+        # lanes = []
+        # while lane_endpoints:
+        #     lane_completed = False
+        #     lane = []
+        #     idx = lane_endpoints[0]
+        #     path.append(idx)
+        #     while not lane_completed:
+        #         next_
+        #         path.append(idx)
+        #         next_point = colineal_points_total[idx]
+
+        #         path.append()
+
+
+        # from PIL import Image, ImageDraw
+        # im = Image.fromarray(toltal_mask)
+        # draw = ImageDraw.Draw(im) 
+        # draw.line([intersect_points[0], intersect_points[1]], fill=1, width=5)
+        # plt.imshow(np.array(im))
 
 
 
@@ -481,6 +518,8 @@ skeleton[:,-1] = 0
 
 plt.figure()
 plt.imshow(skeleton)
+plt.figure()
+plt.imshow(img)
 plt.show()
 
 skleton_points = sort_skeleton(skeleton, img)
