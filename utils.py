@@ -19,6 +19,7 @@ import math
 from math import ceil
 from scipy.ndimage.morphology import binary_fill_holes
 import vis
+from skimage.morphology import remove_small_objects
 
 caffe_root = "/home/davidgj/projects_v2/caffe-segnet-cudnn5/"
 
@@ -107,7 +108,62 @@ def pad_img(img, pad_value=0):
     img_padded = cv2.copyMakeBorder(img, y_pad[0], y_pad[1], x_pad[0], x_pad[1], cv2.BORDER_CONSTANT, value=[pad_value, pad_value, pad_value])
     return img_padded, x_pad, y_pad
 
+def get_line_coeffs(point, orientation):
+    x, y = point
+    A = math.sin(orientation)
+    B = math.cos(orientation)
+    C = -(A * x + B * y)
+    return (A, B, C)
 
+def get_dist_to_line(line_coeffs, point):
+    x, y = point
+    A, B, C = line_coeffs
+    dist = abs(A * x + B * y + C)/math.sqrt((A ** 2) + (B ** 2))
+    return dist
+
+def find_intersect(line1_coeffs, line2_coeffs):
+
+    A1, B1, C1 = line1_coeffs
+    A2, B2, C2 = line2_coeffs
+
+    denom = (A1 * B2 - B1 * A2)
+    if abs(denom) > 1e-10:
+        x = (B1 * C2 - C1 * B2) / denom
+        y = (C1 * A2 - A1 * C2) / denom
+    else:
+        return None
+
+    return (x, y)
+
+def find_intesect_borders(line_coeffs, sz):
+
+    def check_intersect(point, sz):
+        H, W = sz
+        return (0.0 <= point[0] <= float(W)) and (0.0 <= point[1] <= float(H))
+
+    H, W = sz
+
+    upper_border_coeffs = (0.0, 1.0, 0.0)
+    lower_border_coeffs = (0.0, 1.0, -float(H))
+    left_border_coeffs = (1.0, 0.0, 0.0)
+    right_border_coeffs = (1.0, 0.0, -float(W))
+
+    upper_border_intersect = find_intersect(line_coeffs, upper_border_coeffs)
+    lower_border_intersect = find_intersect(line_coeffs, lower_border_coeffs)
+    left_border_intersect = find_intersect(line_coeffs, left_border_coeffs)
+    right_border_intersect = find_intersect(line_coeffs, right_border_coeffs)
+
+    intersect_points = []
+    if check_intersect(upper_border_intersect, sz):
+        intersect_points.append(upper_border_intersect)
+    if check_intersect(lower_border_intersect, sz):
+        intersect_points.append(lower_border_intersect)
+    if check_intersect(left_border_intersect, sz):
+        intersect_points.append(left_border_intersect)
+    if check_intersect(right_border_intersect, sz):
+        intersect_points.append(right_border_intersect)
+
+    return intersect_points
 
 def divide_skel(coords, D=50, M=200, thresh=5, min_height=100):
     
@@ -249,16 +305,105 @@ def sort_skeleton(skel, img, min_num_points=500):
             toltal_mask = paste_mask(toltal_mask, mask, section_mid_points[index], section_angles[index])
             # pdb.set_trace()
 
-        toltal_mask_ = binary_fill_holes(toltal_mask.astype(int))
+        toltal_mask = binary_fill_holes(toltal_mask.astype(int)).astype(int)
+        toltal_mask = remove_small_objects(measure.label(toltal_mask, connectivity=2), min_size=100)
+        toltal_mask = (toltal_mask > 0).astype(np.uint8)
+        props = measure.regionprops(measure.label(toltal_mask, connectivity=2), coordinates='xy')
+
+        colineal_thresh = 15
+        distance_thresh = 350
+        colineal_points_total = []
+        from PIL import Image, ImageDraw
+
+        for prop_idx in range(len(props)):
+            y0, x0 = props[prop_idx]["centroid"]
+            orientation = props[prop_idx]["orientation"]
+            line_coeffs = get_line_coeffs((x0, y0), orientation)
+            # intersect_points = find_intesect_borders(line_coeffs, toltal_mask.shape)
+            # im = Image.fromarray(toltal_mask)
+            # draw = ImageDraw.Draw(im) 
+            # draw.line([intersect_points[0], intersect_points[1]], fill=1, width=5)
+            # plt.imshow(np.array(im))
+            # plt.show()
+            colineal_points = []
+            distances = []
+            for _prop_idx in range(len(props)):
+                if _prop_idx != prop_idx:
+                    _y0, _x0 = props[_prop_idx]["centroid"]
+                    print get_dist_to_line(line_coeffs, (_x0, _y0))
+                    print cdist(np.array([(x0,y0)]), np.array([(_x0,_y0)]))
+                    print _prop_idx
+
+                    if get_dist_to_line(line_coeffs, (_x0, _y0)) < colineal_thresh:
+                        distances.append(cdist(np.array([(x0,y0)]), np.array([(_x0,_y0)])))
+                        if distances[-1] < distance_thresh:
+                            colineal_points.append(_prop_idx)
+                        else:
+                            distances.pop()
+
+            final_points = colineal_points         
+            final_points = []
+
+            colineal_points, distances = (list(t) for t in zip(*sorted(zip(colineal_points, distances), key = lambda x: x[1])))
+            #pdb.set_trace()
+            final_points.append(colineal_points.pop(0))
+            y1, x1 = props[final_points[0]]["centroid"]
+
+            while (len(final_points) != 2) and (len(colineal_points) > 0):
+                y2, x2 = props[colineal_points[0]]["centroid"]
+                dist_2_0 = cdist(np.array([(x0,y0)]), np.array([(x2,y2)]))
+                dist_2_1 = cdist(np.array([(x1,y1)]), np.array([(x2,y2)]))
+                if dist_2_1 > dist_2_0:
+                    final_points.append(colineal_points.pop(0))
+                else:
+                    colineal_points.pop(0)
+
+
+            colineal_points_total.append(final_points)
+
+
+        for prop_idx in range(len(props)):
+
+            fig, ax = plt.subplots(1)
+            ax.imshow(toltal_mask)
+
+            y0, x0 = props[prop_idx]["centroid"]
+            circle = Circle((x0, y0), 10, color='r')
+            ax.add_patch(circle)
+
+            for colineal_idx in range(len(colineal_points_total[prop_idx])):
+                _prop_idx = colineal_points_total[prop_idx][colineal_idx]
+                y0, x0 = props[_prop_idx]["centroid"]
+                circle = Circle((x0, y0), 10, color='k')
+                ax.add_patch(circle)
+
+            plt.show()
+
+            # circ1 = Circle(center[::-1],20)
+            # circ2 = Circle(center[::-1],20)
+            #pdb.set_trace()
+            #colineal_points = [for ]
+
+            #intersect_points = find_intesect_borders(line_coeffs, toltal_mask.shape)
+        pdb.set_trace()
+
+        # y0, x0 = props[0]["centroid"]
+        # x1, y1 = x0 + 200 * math.cos(props[0]["orientation"] - math.pi/2), y0 + 200 * math.sin(props[0]["orientation"]-math.pi/2)
+
+        from PIL import Image, ImageDraw
+        im = Image.fromarray(toltal_mask)
+        draw = ImageDraw.Draw(im) 
+        draw.line([intersect_points[0], intersect_points[1]], fill=1, width=5)
+        plt.imshow(np.array(im))
+
+
+
         pdb.set_trace()
         plt.figure()
-        plt.imshow(vis.vis_seg(img, toltal_mask_.astype(int), vis.make_palette(2)))
+        plt.imshow(vis.vis_seg(img, toltal_mask.astype(int), vis.make_palette(2)))
         plt.figure()
         plt.imshow(toltal_mask.astype(int))
-        plt.figure()
-        plt.imshow(toltal_mask_)
         plt.show()
-        pdb.set_trace()
         sorted_coord_labels.append(sorted_coord)
         
     return sorted_coord_labels
