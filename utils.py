@@ -173,7 +173,7 @@ def find_intesect_borders(line_coeffs, sz):
 
     return intersect_points
 
-def divide_skel(coords, D=50, M=200, thresh=5, min_height=100):
+def divide_skel(coords, D=200, M=200, thresh=2, min_height=100):
     
     ref_index = 0
     angles = []
@@ -198,7 +198,7 @@ def divide_skel(coords, D=50, M=200, thresh=5, min_height=100):
     for center_index in range(M, (len(coords) - 1) - M, D):
         angle = _get_angle(coords[center_index - D], coords[center_index + D])
         angles.append(angle)
-        if (angle - angles[ref_index]) > thresh:
+        if abs(angle - angles[ref_index]) > thresh:
             ref_index = len(angles) - 1
             _add_new_section(coords[center_index])
             
@@ -561,7 +561,8 @@ def segment_marks(total_mask, colineal_thresh=15, distance_thresh=350):
                 lane_endpoints.remove(next_idx)
                 lane_completed = True
 
-        lanes.append(marks_idx)
+        if len(marks_idx) > 2:
+            lanes.append(marks_idx)
 
     total_mask_labeled = measure.label(total_mask, connectivity=2)
     new_total_mask = np.zeros(total_mask.shape, dtype=np.uint8)
@@ -718,6 +719,8 @@ skeleton[:,0] = 0
 skeleton[:,-1] = 0
 
 plt.figure()
+plt.imshow(mask_download)
+plt.figure()
 plt.imshow(skeleton)
 plt.figure()
 plt.imshow(img)
@@ -733,7 +736,11 @@ print ">>>>>>>>>>>>>>>>>>>>>>>>"
 one_section_segmentation = True
 for section in skleton_sections:
 
-    section_mid_points, section_angles, section_height, _ = divide_skel(section, M=75)
+    section_mid_points, section_angles, section_height, _angles = divide_skel(section, M=200)
+
+    pdb.set_trace()
+    plt.plot(_angles)
+    plt.show()
 
     if len(section_mid_points) > 1:
         one_section_segmentation = False
@@ -810,7 +817,7 @@ with tf.Graph().as_default():
             plt.show()
         else:
             total_mask = binary_fill_holes(total_mask.astype(int)).astype(int)
-            total_mask = remove_small_objects(measure.label(total_mask, connectivity=2), min_size=100)
+            total_mask = remove_small_objects(measure.label(total_mask, connectivity=2), min_size=50)
             new_total_mask, num_lanes = segment_marks(total_mask)
             vis_img = vis.vis_seg(img, new_total_mask, vis.make_palette(num_lanes+1))
             plt.imshow(vis_img)
