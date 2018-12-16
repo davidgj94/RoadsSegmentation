@@ -24,7 +24,7 @@ from math import ceil
 import tensorflow as tf
 import segnet_TF
 
-# caffe_root = "/home/davidgj/projects_v2/caffe-segnet-cudnn5/"
+caffe_root = "/home/davidgj/projects_v2/caffe-segnet-cudnn5/"
 
 
 # sys.path.insert(0, caffe_root + 'python')
@@ -81,7 +81,7 @@ def _get_angle(p1, p2):
     yy = (p1[0], p2[0])
 
     if xx[0] == xx[1]:
-        angle = math.pi/2
+        angle = math.degrees(math.pi/2)
     else:
         a = float(xx[0] - xx[1])
         b = float(yy[0] - yy[1])
@@ -336,7 +336,7 @@ def sort_skeleton(skel, img, min_num_points=500):
 
         sorted_coord_labels.append(sorted_coord)
 
-    #     section_mid_points, section_angles, section_height, angles = divide_skel(sorted_coord)
+        section_mid_points, section_angles, section_height, angles = divide_skel(sorted_coord)
 
     #     for index, _ in enumerate(section_mid_points):
     #         crop = extract_section(img, section_mid_points[index], section_angles[index], section_height[index])
@@ -345,18 +345,25 @@ def sort_skeleton(skel, img, min_num_points=500):
     # plt.show()
 
         
-        # toltal_mask = np.zeros(img.shape).astype(bool)
-        # toltal_mask = toltal_mask[...,0]
+        # total_mask = np.zeros(img.shape).astype(bool)
+        # total_mask = total_mask[...,0]
         # for index, _ in enumerate(section_mid_points):
         #     crop = extract_section(img, section_mid_points[index], section_angles[index], section_height[index])
-        #     plt.imshow(crop)
-        #     plt.show()
-        #     crop, pad_x, pad_y = pad_img(crop)
+        #     crop, pad_x, pad_y = pad_img(crop, (384, 224))
         #     mask = road_segmentation(crop)
-        #     mask = mask[pad_y[0]:-pad_y[1], pad_x[0]:-pad_x[1]]
+        #     mask = mask[pad_y[0]:384-pad_y[1], pad_x[0]:224-pad_x[1]]
         #     mask = (mask == 1)
-        #     toltal_mask = paste_mask(toltal_mask, mask, section_mid_points[index], section_angles[index])
+        #     total_mask = paste_mask(total_mask, mask, section_mid_points[index], section_angles[index])
         #     # pdb.set_trace()
+        # total_mask = binary_fill_holes(total_mask.astype(int)).astype(int)
+        # total_mask = remove_small_objects(measure.label(total_mask, connectivity=2), min_size=100)
+        # total_mask = (total_mask > 0).astype(np.uint8)
+
+
+        # vis_img = vis.vis_seg(img, total_mask, np.array([[255,255,255],[0, 0, 255],[0, 255, 0]]))
+        # plt.imshow(vis_img)
+        # plt.show()
+        # pdb.set_trace()
 
         # toltal_mask = binary_fill_holes(toltal_mask.astype(int)).astype(int)
         # toltal_mask = remove_small_objects(measure.label(toltal_mask, connectivity=2), min_size=100)
@@ -490,7 +497,53 @@ def test_sort_skeleton():
     sorted_points = sort_skeleton(skel)
     pdb.set_trace()
     print "Fin"
-    
+
+def segment_one_section(mask, x_dist_thresh = 3):
+
+    # plt.imshow(measure.label(mask, connectivity=2))
+    # plt.show()
+    props = measure.regionprops(measure.label(mask, connectivity=2), coordinates='xy')
+    props_idx = range(len(props))
+    lanes = []
+    while props_idx:
+
+        idx = props_idx[0]
+        y0, x0 = props[idx]["centroid"]
+        lane_idxs = [idx]
+        lane_x0s = [x0]
+
+        for _idx in props_idx:
+            if _idx != idx:
+                _y0, _x0 = props[_idx]["centroid"]
+                print abs(x0 - _x0)
+                if abs(x0 - _x0) < x_dist_thresh:
+                    lane_idxs.append(_idx)
+                    lane_x0s = [_x0]
+            print 
+        for lane_idx in lane_idxs:
+            props_idx.remove(lane_idx)
+
+        if len(lane_idxs) > 1:
+            lane_x = int(np.mean(lane_x0s))
+            lanes.append(lane_x)
+
+
+    _mask = np.zeros(mask.shape, dtype=np.uint8)
+
+    for lane_x in lanes:
+        _mask[:,lane_x] = 1
+
+    plt.figure()
+    plt.imshow(mask)
+    plt.figure()
+    plt.imshow(_mask)
+    plt.show()
+
+
+
+
+
+
 def detect_br_ep(sk):
     
     branch1=np.array([[2, 1, 2], [1, 1, 1], [2, 2, 2]])
@@ -563,14 +616,18 @@ H_list = []
 W_list = []
 mid_points = []
 angles = []
+print ">>>>>>>>>>>>>>>>>>>>>>>>"
 for section in skleton_sections:
 
-    section_mid_points, section_angles, section_height, angles = divide_skel(section)
+    section_mid_points, section_angles, section_height, _ = divide_skel(section)
 
     for index, _ in enumerate(section_mid_points):
 
         crop = extract_section(img, section_mid_points[index], section_angles[index], section_height[index])
         H, W = crop.shape[:2]
+        print section_mid_points[index]
+        print section_angles[index]
+        print
 
         H_list.append(H)
         W_list.append(W)
@@ -578,13 +635,15 @@ for section in skleton_sections:
         mid_points.append(section_mid_points[index])
         angles.append(section_angles[index])
 
+#pdb.set_trace()
+
 H_max = max(H_list)
 W_max = max(W_list)
 
 H_pad = H_max + int(ceil(float(H_max) / 32) * 32 - H_max)
 W_pad = W_max + int(ceil(float(W_max) / 32) * 32 - W_max)
 
-
+print ">>>>>>>>>>>>>>>>>>>>>>>>"
 with tf.Graph().as_default():
 
     image  = tf.placeholder(tf.float32, shape=[1, H_pad, W_pad, 3], name="input")
@@ -610,16 +669,32 @@ with tf.Graph().as_default():
             #         mask = mask[y_pad[0]:-y_pad[-1], x_pad[0]:]
             #     else:
             #         y_pad[1] == 0 and x_pad[1] != 0
-            print padded_crop.shape
-            print mask.shape
-            print
-            vis_img = vis.vis_seg(padded_crop, (mask == 1).astype(int), np.array([[255,255,255],[0, 0, 255],[0, 255, 0]]))
+            # print padded_crop.shape
+            # print mask.shape
+            # print
+            # vis_img = vis.vis_seg(padded_crop, (mask == 1).astype(int), np.array([[255,255,255],[0, 0, 255],[0, 255, 0]]))
+            # plt.figure()
+            # plt.imshow(vis_img)
+            mask = mask[y_pad[0]:H_pad-y_pad[-1], x_pad[0]:W_pad-x_pad[1]]
+            plt.figure()
+            plt.imshow(crop)
+            mask = binary_fill_holes((mask == 1).astype(int)).astype(int)
+            # plt.figure()
+            # plt.imshow(mask)
+            mask = remove_small_objects(measure.label(mask, connectivity=2), min_size=20)
+            # plt.figure()
+            # plt.imshow(mask)
+            segment_one_section((mask > 0).astype(int))
+            vis_img = vis.vis_seg(crop, (mask == 1).astype(int), np.array([[255,255,255],[0, 0, 255],[0, 255, 0]]))
             plt.figure()
             plt.imshow(vis_img)
-            mask = mask[y_pad[0]:H_pad-y_pad[-1], x_pad[0]:W_pad-x_pad[1]]
+            #pdb.set_trace()
             mask = (mask == 1)
             #pdb.set_trace()
             total_mask = paste_mask(total_mask, mask, mid_point, angle)
+            print mid_point
+            print angle
+            print
         plt.show()
 
         total_mask = binary_fill_holes(total_mask.astype(int)).astype(int)

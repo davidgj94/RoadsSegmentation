@@ -1,0 +1,48 @@
+40.100111 -3.634229
+Funciona
+Crops bien
+
+40.121749 -3.655495
+No funciona: File "utils.py", line 237, in paste_mask ValueError: shapes (2,3) and (0,) not aligned: 3 (dim 1) != 0 (dim 0)
+endpoints y branch correcto
+Crops mal, falta tener en cuenta branch
+CRops van bien, ya se tiene en ceunta branch
+
+
+40.160844 -3.661607
+NO funciona: File "utils.py", line 108, in pad_img 
+    img_padded = cv2.copyMakeBorder(img, y_pad[0], y_pad[1], x_pad[0], x_pad[1], cv2.BORDER_CONSTANT, value=[pad_value, pad_value, pad_value])
+cv2.error: /home/davidgj/projects_v2/opencv/modules/core/src/copy.cpp:1172: error: (-215) top >= 0 && bottom >= 0 && left >= 0 && right >= 0 in function copyMakeBorder
+endpoints y branch correcto
+El fallo debido al problema del padding para meter en Segnet
+Crops bien
+
+40.294167 -3.691338
+No funciona: File "utils.py", line 172, in divide_skel
+sections_start = [coords[M]]
+IndexError: list index out of range
+endpoints y branch falla (mirar hit and miss los 2)
+
+
+40.285479 -3.691105
+No funciona
+endpoints y branch funciona
+Crops mal, falta tener en cuenta branch
+CRops van bien, ya se tiene en ceunta branch
+
+40.095551 -3.666586
+NO funciona:
+File "utils.py", line 108, in pad_img
+img_padded = cv2.copyMakeBorder(img, y_pad[0], y_pad[1], x_pad[0], x_pad[1], cv2.BORDER_CONSTANT, value=[pad_value, pad_value, pad_value])
+cv2.error: /home/davidgj/projects_v2/opencv/modules/core/src/copy.cpp:1172: error: (-215) top >= 0 && bottom >= 0 && left >= 0 && right >= 0 in function copyMakeBorder
+endpoints y branch funciona
+El fallo debido al problema del padding para meter en Segnet
+Crops bien
+
+40.084341 -3.673123
+NO funciona:
+img_padded = cv2.copyMakeBorder(img, y_pad[0], y_pad[1], x_pad[0], x_pad[1], cv2.BORDER_CONSTANT, value=[pad_value, pad_value, pad_value])
+cv2.error: /home/davidgj/projects_v2/opencv/modules/core/src/copy.cpp:1172: error: (-215) top >= 0 && bottom >= 0 && left >= 0 && right >= 0 in function copyMakeBorder
+endpoints y branch funciona
+El fallo debido al problema del padding para meter en Segnet
+Crops bien
