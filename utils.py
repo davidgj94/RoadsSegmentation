@@ -21,36 +21,35 @@ from scipy.ndimage.morphology import binary_fill_holes
 import vis
 from skimage.morphology import remove_small_objects
 from math import ceil
-import tensorflow as tf
-import segnet_TF
+#import tensorflow as tf
+#import segnet_TF
 
 caffe_root = "/home/davidgj/projects_v2/caffe-segnet-cudnn5/"
 
+sys.path.insert(0, caffe_root + 'python')
 
-# sys.path.insert(0, caffe_root + 'python')
+import caffe; caffe.set_mode_gpu()
 
-# import caffe; caffe.set_mode_gpu()
+prototxt = "/home/davidgj/projects_v2/SegNet-Tutorial/Models/roads/inference_video.prototxt"
+caffemodel = "/home/davidgj/projects_v2/SegNet-Tutorial/Models/Inference/roads/snapshot_iter_1500/test_weights.caffemodel"
+net = caffe.Net(prototxt, caffemodel, caffe.TEST)
 
-# prototxt = "/home/davidgj/projects_v2/SegNet-Tutorial/Models/roads/inference_video.prototxt"
-# caffemodel = "/home/davidgj/projects_v2/SegNet-Tutorial/Models/Inference/roads/snapshot_iter_1500/test_weights.caffemodel"
-# net = caffe.Net(prototxt, caffemodel, caffe.TEST)
+def road_segmentation(img):
 
-# def road_segmentation(img):
+    img = img[...,::-1]
+    img = img.transpose((2,0,1))
+    img = img[np.newaxis,...]
+    print img.shape
 
-#     img = img[...,::-1]
-#     img = img.transpose((2,0,1))
-#     img = img[np.newaxis,...]
-#     print img.shape
+    net.blobs['data'].reshape(*img.shape)
+    net.blobs['data'].data[...] = img
 
-#     net.blobs['data'].reshape(*img.shape)
-#     net.blobs['data'].data[...] = img
+    net.forward()
 
-#     net.forward()
+    predicted = np.squeeze(net.blobs['prob'].data)
+    ind = np.argmax(predicted, axis=0)
 
-#     predicted = np.squeeze(net.blobs['prob'].data)
-#     ind = np.argmax(predicted, axis=0)
-
-#     return ind
+    return ind
 
 base_URL = "https://maps.googleapis.com/maps/api/staticmap?key=AIzaSyDvgF0JSBrlYLDzY7pPqtcBSgGslmaAlzw&zoom=19&format=png&maptype=roadmap&style=color:0x000000&style=element:labels%7Cvisibility:off&style=feature:road%7Celement:geometry%7Ccolor:0xffffff%7Cvisibility:on&style=feature:road.highway%7Celement:geometry%7Ccolor:0xffffff%7Cvisibility:on&style=feature:road.local%7Celement:geometry%7Cvisibility:off&size=640x640&scale=2"
 
@@ -345,86 +344,126 @@ def sort_skeleton(skel, img, min_num_points=500):
     # plt.show()
 
         
-        # total_mask = np.zeros(img.shape).astype(bool)
-        # total_mask = total_mask[...,0]
-        # for index, _ in enumerate(section_mid_points):
-        #     crop = extract_section(img, section_mid_points[index], section_angles[index], section_height[index])
-        #     crop, pad_x, pad_y = pad_img(crop, (384, 224))
-        #     mask = road_segmentation(crop)
-        #     mask = mask[pad_y[0]:384-pad_y[1], pad_x[0]:224-pad_x[1]]
-        #     mask = (mask == 1)
-        #     total_mask = paste_mask(total_mask, mask, section_mid_points[index], section_angles[index])
-        #     # pdb.set_trace()
-        # total_mask = binary_fill_holes(total_mask.astype(int)).astype(int)
-        # total_mask = remove_small_objects(measure.label(total_mask, connectivity=2), min_size=100)
-        # total_mask = (total_mask > 0).astype(np.uint8)
+        total_mask = np.zeros(img.shape).astype(bool)
+        total_mask = total_mask[...,0]
+        for index, _ in enumerate(section_mid_points):
+            crop = extract_section(img, section_mid_points[index], section_angles[index], section_height[index])
+            crop, pad_x, pad_y = pad_img(crop, (384, 224))
+            mask = road_segmentation(crop)
+            mask = mask[pad_y[0]:384-pad_y[1], pad_x[0]:224-pad_x[1]]
+            mask = (mask == 1)
+            total_mask = paste_mask(total_mask, mask, section_mid_points[index], section_angles[index])
+            # pdb.set_trace()
+        total_mask = binary_fill_holes(total_mask.astype(int)).astype(int)
+        total_mask = remove_small_objects(measure.label(total_mask, connectivity=2), min_size=100)
+        total_mask = (total_mask > 0).astype(np.uint8)
 
 
-        # vis_img = vis.vis_seg(img, total_mask, np.array([[255,255,255],[0, 0, 255],[0, 255, 0]]))
-        # plt.imshow(vis_img)
-        # plt.show()
-        # pdb.set_trace()
+        vis_img = vis.vis_seg(img, total_mask, np.array([[255,255,255],[0, 0, 255],[0, 255, 0]]))
+        plt.imshow(vis_img)
+        plt.show()
+        #pdb.set_trace()
 
         # toltal_mask = binary_fill_holes(toltal_mask.astype(int)).astype(int)
         # toltal_mask = remove_small_objects(measure.label(toltal_mask, connectivity=2), min_size=100)
         # toltal_mask = (toltal_mask > 0).astype(np.uint8)
-        # props = measure.regionprops(measure.label(toltal_mask, connectivity=2), coordinates='xy')
+        props = measure.regionprops(measure.label(total_mask, connectivity=2), coordinates='xy')
 
-        # colineal_thresh = 15
-        # distance_thresh = 350
-        # colineal_points_total = []
-        # from PIL import Image, ImageDraw
+        colineal_thresh = 15
+        distance_thresh = 350
+        colineal_points_total = []
+        from PIL import Image, ImageDraw
 
-        # for prop_idx in range(len(props)):
-        #     y0, x0 = props[prop_idx]["centroid"]
-        #     orientation = props[prop_idx]["orientation"]
-        #     line_coeffs = get_line_coeffs((x0, y0), orientation)
-        #     # intersect_points = find_intesect_borders(line_coeffs, toltal_mask.shape)
-        #     # im = Image.fromarray(toltal_mask)
-        #     # draw = ImageDraw.Draw(im) 
-        #     # draw.line([intersect_points[0], intersect_points[1]], fill=1, width=5)
-        #     # plt.imshow(np.array(im))
-        #     # plt.show()
-        #     colineal_points = []
-        #     distances = []
-        #     for _prop_idx in range(len(props)):
-        #         if _prop_idx != prop_idx:
-        #             _y0, _x0 = props[_prop_idx]["centroid"]
-        #             print get_dist_to_line(line_coeffs, (_x0, _y0))
-        #             print cdist(np.array([(x0,y0)]), np.array([(_x0,_y0)]))
-        #             print _prop_idx
+        for prop_idx in range(len(props)):
+            y0, x0 = props[prop_idx]["centroid"]
+            orientation = props[prop_idx]["orientation"]
+            line_coeffs = get_line_coeffs((x0, y0), orientation)
+            # intersect_points = find_intesect_borders(line_coeffs, toltal_mask.shape)
+            # im = Image.fromarray(toltal_mask)
+            # draw = ImageDraw.Draw(im) 
+            # draw.line([intersect_points[0], intersect_points[1]], fill=1, width=5)
+            # plt.imshow(np.array(im))
+            # plt.show()
+            colineal_points = []
+            distances = []
+            for _prop_idx in range(len(props)):
+                if _prop_idx != prop_idx:
+                    _y0, _x0 = props[_prop_idx]["centroid"]
+                    print get_dist_to_line(line_coeffs, (_x0, _y0))
+                    print cdist(np.array([(x0,y0)]), np.array([(_x0,_y0)]))
+                    print _prop_idx
 
-        #             if get_dist_to_line(line_coeffs, (_x0, _y0)) < colineal_thresh:
-        #                 distances.append(cdist(np.array([(x0,y0)]), np.array([(_x0,_y0)])))
-        #                 if distances[-1] < distance_thresh:
-        #                     colineal_points.append(_prop_idx)
-        #                 else:
-        #                     distances.pop()
+                    if get_dist_to_line(line_coeffs, (_x0, _y0)) < colineal_thresh:
+                        distances.append(cdist(np.array([(x0,y0)]), np.array([(_x0,_y0)])))
+                        if distances[-1] < distance_thresh:
+                            colineal_points.append(_prop_idx)
+                        else:
+                            distances.pop()
     
-        #     final_points = []
+            final_points = []
 
-        #     colineal_points, distances = (list(t) for t in zip(*sorted(zip(colineal_points, distances), key = lambda x: x[1])))
-        #     #pdb.set_trace()
-        #     final_points.append(colineal_points.pop(0))
-        #     y1, x1 = props[final_points[0]]["centroid"]
+            colineal_points, distances = (list(t) for t in zip(*sorted(zip(colineal_points, distances), key = lambda x: x[1])))
+            #pdb.set_trace()
+            final_points.append(colineal_points.pop(0))
+            y1, x1 = props[final_points[0]]["centroid"]
 
-        #     while (len(final_points) != 2) and (len(colineal_points) > 0):
-        #         y2, x2 = props[colineal_points[0]]["centroid"]
-        #         dist_2_0 = cdist(np.array([(x0,y0)]), np.array([(x2,y2)]))
-        #         dist_2_1 = cdist(np.array([(x1,y1)]), np.array([(x2,y2)]))
-        #         if dist_2_1 > dist_2_0:
-        #             final_points.append(colineal_points.pop(0))
-        #         else:
-        #             colineal_points.pop(0)
+            while (len(final_points) != 2) and (len(colineal_points) > 0):
+                y2, x2 = props[colineal_points[0]]["centroid"]
+                dist_2_0 = cdist(np.array([(x0,y0)]), np.array([(x2,y2)]))
+                dist_2_1 = cdist(np.array([(x1,y1)]), np.array([(x2,y2)]))
+                if dist_2_1 > dist_2_0:
+                    final_points.append(colineal_points.pop(0))
+                else:
+                    colineal_points.pop(0)
 
 
-        #     colineal_points_total.append(final_points)
+            colineal_points_total.append(final_points)
+
+        lane_endpoints = []
+        for idx, _colineal_point in enumerate(colineal_points_total):
+            if len(_colineal_point) == 1:
+                lane_endpoints.append(idx)
+
+        lanes = []
+        while lane_endpoints:
+
+            marks_idx = []
+            endpoint_idx = lane_endpoints.pop(0)
+            marks_idx.append(endpoint_idx)
+            current_idx = endpoint_idx
+            next_idx = colineal_points_total[current_idx][0]
+            lane_completed = False
+
+            while not lane_completed:
+
+                marks_idx.append(next_idx)
+                _next_idx = list(set(colineal_points_total[next_idx]) - set([current_idx]))
+
+                if _next_idx:
+                    current_idx = next_idx
+                    next_idx = _next_idx[0]
+                else:
+                    lane_endpoints.remove(next_idx)
+                    lane_completed = True
+
+            lanes.append(marks_idx)
+
+        total_mask_labeled = measure.label(total_mask, connectivity=2)
+        new_total_mask = np.zeros(total_mask.shape, dtype=np.uint8)
+        for lane_idx in range(len(lanes)):
+            for mark_idx in lanes[lane_idx]:
+                new_total_mask[total_mask_labeled == props[mark_idx]["label"]] = (lane_idx + 1)
+
+        plt.imshow(new_total_mask)
+        plt.show()
+
+
 
 
         # for prop_idx in range(len(props)):
 
         #     fig, ax = plt.subplots(1)
-        #     ax.imshow(toltal_mask)
+        #     ax.imshow(total_mask)
 
         #     y0, x0 = props[prop_idx]["centroid"]
         #     circle = Circle((x0, y0), 10, color='r')
@@ -438,10 +477,11 @@ def sort_skeleton(skel, img, min_num_points=500):
 
         #     plt.show()
 
-        #     # circ1 = Circle(center[::-1],20)
-        #     # circ2 = Circle(center[::-1],20)
-        #     #pdb.set_trace()
-        #     #colineal_points = [for ]
+
+            # circ1 = Circle(center[::-1],20)
+            # circ2 = Circle(center[::-1],20)
+            #pdb.set_trace()
+            #colineal_points = [for ]
 
         #     #intersect_points = find_intesect_borders(line_coeffs, toltal_mask.shape)
 
@@ -498,46 +538,78 @@ def test_sort_skeleton():
     pdb.set_trace()
     print "Fin"
 
-def segment_one_section(mask, x_dist_thresh = 3):
+def segment_one_section(mask, x_dist_thresh=3):
 
     # plt.imshow(measure.label(mask, connectivity=2))
     # plt.show()
-    props = measure.regionprops(measure.label(mask, connectivity=2), coordinates='xy')
-    props_idx = range(len(props))
-    lanes = []
-    while props_idx:
 
-        idx = props_idx[0]
-        y0, x0 = props[idx]["centroid"]
-        lane_idxs = [idx]
-        lane_x0s = [x0]
+    def compute_x_values(_mask, min_objects=1):
 
-        for _idx in props_idx:
-            if _idx != idx:
-                _y0, _x0 = props[_idx]["centroid"]
-                print abs(x0 - _x0)
-                if abs(x0 - _x0) < x_dist_thresh:
-                    lane_idxs.append(_idx)
-                    lane_x0s = [_x0]
-            print 
-        for lane_idx in lane_idxs:
-            props_idx.remove(lane_idx)
+        props = measure.regionprops(measure.label(_mask, connectivity=2), coordinates='xy')
+        props_idx = range(len(props))
+        x_value = []
+        while props_idx:
 
-        if len(lane_idxs) > 1:
-            lane_x = int(np.mean(lane_x0s))
-            lanes.append(lane_x)
+            idx = props_idx[0]
+            y0, x0 = props[idx]["centroid"]
+            lane_idxs = [idx]
+            lane_x0s = [x0]
 
+            for _idx in props_idx:
+                if _idx != idx:
+                    _y0, _x0 = props[_idx]["centroid"]
+                    print abs(x0 - _x0)
+                    if abs(x0 - _x0) < x_dist_thresh:
+                        lane_idxs.append(_idx)
+                        lane_x0s = [_x0]
+                print 
+            for lane_idx in lane_idxs:
+                props_idx.remove(lane_idx)
+
+            if len(lane_idxs) >= min_objects:
+                lane_x = int(np.mean(lane_x0s))
+                x_value.append(lane_x)
+
+        return x_value
+
+    mask_1 = (mask == 1)
+    mask_1 = binary_fill_holes(mask_1.astype(int)).astype(int)
+    mask_1 = remove_small_objects(measure.label(mask_1, connectivity=2), min_size=20)
+    x_values_1 = sorted(compute_x_values(mask_1, min_objects=2))
+
+    mask_2 = (mask == 2)
+    mask_2 = binary_fill_holes(mask_2.astype(int)).astype(int)
+    mask_2 = remove_small_objects(measure.label(mask_2, connectivity=2), min_size=20)
+    x_values_2 = sorted(compute_x_values(mask_2))
+
+    for i in range(len(x_values_2)):
+        x_value_1_selected = []
+        for x_value_1 in x_values_1:
+            if x_values_2[i] < x_value_1 < x_values_2[i+1]:
+                x_value_1_selected.append(x_value_1)
+        if x_value_1_selected:
+            lane_limits = x_value_1_selected
+            lane_limits.insert(0, x_values_2[i])
+            lane_limits.append(x_values_2[i+1])
+            break
+
+    # lane_limits = sorted(lanes)
+    # lane_limits.insert(0, 0)
+    # lane_limits.append(mask.shape[1])
 
     _mask = np.zeros(mask.shape, dtype=np.uint8)
+    for i in range(len(lane_limits)-1):
+        _mask[:,lane_limits[i]:lane_limits[i+1]] = (i + 1)
 
-    for lane_x in lanes:
-        _mask[:,lane_x] = 1
+    num_lanes = len(lane_limits)-1
 
-    plt.figure()
-    plt.imshow(mask)
-    plt.figure()
-    plt.imshow(_mask)
-    plt.show()
+    return _mask, num_lanes
+
+    # plt.figure()
+    # plt.imshow(mask)
+    # plt.figure()
+    # plt.imshow(_mask)
+    # plt.show()
 
 
 
@@ -593,11 +665,11 @@ def detect_br_ep(sk):
 
 
 
-img, mask = download_img_mask(coord)
-mask = mask[:1200,:]
+img, mask_download = download_img_mask(coord)
+mask_download = mask_download[:1200,:]
 img = img[:1200,:]
 
-skeleton = morphology.medial_axis(mask == 255)
+skeleton = morphology.medial_axis(mask_download == 255)
 
 skeleton[0,:] = 0
 skeleton[-1,:] = 0
@@ -619,7 +691,7 @@ angles = []
 print ">>>>>>>>>>>>>>>>>>>>>>>>"
 for section in skleton_sections:
 
-    section_mid_points, section_angles, section_height, _ = divide_skel(section)
+    section_mid_points, section_angles, section_height, _ = divide_skel(section, M=75)
 
     for index, _ in enumerate(section_mid_points):
 
@@ -643,7 +715,7 @@ W_max = max(W_list)
 H_pad = H_max + int(ceil(float(H_max) / 32) * 32 - H_max)
 W_pad = W_max + int(ceil(float(W_max) / 32) * 32 - W_max)
 
-print ">>>>>>>>>>>>>>>>>>>>>>>>"
+i_class = 0
 with tf.Graph().as_default():
 
     image  = tf.placeholder(tf.float32, shape=[1, H_pad, W_pad, 3], name="input")
@@ -654,7 +726,7 @@ with tf.Graph().as_default():
 
         sess.run(init_op)
 
-        total_mask = np.zeros(skeleton.shape).astype(bool)
+        total_mask = np.zeros(skeleton.shape, dtype=np.uint8)
         for crop, mid_point, angle in zip(crops, mid_points, angles):
             padded_crop, x_pad, y_pad = pad_img(crop, (H_pad, W_pad))
             padded_crop_ = padded_crop[...,::-1]
@@ -676,25 +748,31 @@ with tf.Graph().as_default():
             # plt.figure()
             # plt.imshow(vis_img)
             mask = mask[y_pad[0]:H_pad-y_pad[-1], x_pad[0]:W_pad-x_pad[1]]
-            plt.figure()
-            plt.imshow(crop)
-            mask = binary_fill_holes((mask == 1).astype(int)).astype(int)
+            #mask = binary_fill_holes((mask == 1).astype(int)).astype(int)
             # plt.figure()
             # plt.imshow(mask)
-            mask = remove_small_objects(measure.label(mask, connectivity=2), min_size=20)
+            #mask = remove_small_objects(measure.label(mask, connectivity=2), min_size=20)
             # plt.figure()
             # plt.imshow(mask)
-            segment_one_section((mask > 0).astype(int))
-            vis_img = vis.vis_seg(crop, (mask == 1).astype(int), np.array([[255,255,255],[0, 0, 255],[0, 255, 0]]))
-            plt.figure()
+            mask_lanes, num_lanes = segment_one_section(mask)
+            # vis_img = vis.vis_seg(crop, (mask == 1).astype(int), np.array([[255,255,255],[0, 0, 255],[0, 255, 0]]))
+            # plt.figure()
+            # plt.imshow(vis_img)
+            #pdb.set_trace()
+            #mask = (mask == 1)
+            #pdb.set_trace()
+
+            for i_lane in range(1, num_lanes+1):
+                i_class += 1
+                total_mask_ = paste_mask(np.zeros(total_mask.shape).astype(bool), (mask_lanes == i_lane), mid_point, angle)
+                total_mask_ = binary_fill_holes(total_mask_.astype(int))
+                total_mask[total_mask_] = i_class
+            pdb.set_trace()
+            #total_mask[mask_download != 255] = 0
+            vis_img = vis.vis_seg(img, total_mask, vis.make_palette(i_class+1))
             plt.imshow(vis_img)
-            #pdb.set_trace()
-            mask = (mask == 1)
-            #pdb.set_trace()
-            total_mask = paste_mask(total_mask, mask, mid_point, angle)
-            print mid_point
-            print angle
-            print
+            plt.show()
+            
         plt.show()
 
         total_mask = binary_fill_holes(total_mask.astype(int)).astype(int)
