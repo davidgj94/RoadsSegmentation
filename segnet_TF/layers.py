@@ -1,6 +1,5 @@
 import numpy as np
 import tensorflow as tf
-FLAGS = tf.app.flags.FLAGS
 import pdb
 
 def unpool_with_argmax(pool, ind, name = None, ksize=[1, 2, 2, 1]):

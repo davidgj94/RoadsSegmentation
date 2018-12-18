@@ -1,10 +1,12 @@
 import tensorflow as tf
-FLAGS = tf.app.flags.FLAGS
 import pickle
 from layers import unpool_with_argmax, conv_classifier, conv_layer_with_bn_caffe
+import os
+import os.path
 
 def get_caffe_weights():
-    with open('/home/david/projects/RoadsSegmentation/segnet_TF/caffe_weights.pickle', 'rb') as handle:
+    caffe_weights_path = os.path.join(os.getcwd(),'segnet_TF','caffe_weights.pickle')
+    with open(caffe_weights_path, 'rb') as handle:
         caffe_weights = pickle.load(handle)
     return caffe_weights
 

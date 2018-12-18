@@ -56,8 +56,6 @@ base_URL = "https://maps.googleapis.com/maps/api/staticmap?key=AIzaSyDvgF0JSBrlY
 
 satellite_URL = "https://maps.googleapis.com/maps/api/staticmap?maptype=satellite&zoom=19&format=png&size=640x640&scale=2&key=AIzaSyDvgF0JSBrlYLDzY7pPqtcBSgGslmaAlzw"
 
-sys.argv.pop(0)
-coord = tuple(sys.argv)
 
 def download_img_mask(coord):
     
@@ -173,7 +171,7 @@ def find_intesect_borders(line_coeffs, sz):
 
     return intersect_points
 
-def divide_skel(coords, D=200, M=200, thresh=2, min_height=100):
+def divide_section(coords, D=200, M=200, thresh=5, min_height=100):
     
     ref_index = 0
     angles = []
@@ -206,8 +204,7 @@ def divide_skel(coords, D=200, M=200, thresh=2, min_height=100):
             
     return section_mid_points, section_angles, section_height, angles
 
-
-def extract_section(img, center, angle, height, width=200):
+def extract_straight_section(img, center, angle, height, width=200):
     
     img_h, img_w = img.shape[:2]
     M = cv2.getRotationMatrix2D(center[::-1], angle - 90, 1.0)
@@ -268,8 +265,7 @@ def _get_next_point(skel, current_point, prev_point=None):
     
     return next_point
     
-
-def sort_skeleton(skel, img, min_num_points=500):
+def divide_skeleton(skel, img, min_num_points=500):
 
     br_mask = np.zeros(skel.shape, dtype=np.uint8)
     br, ep = detect_br_ep(skel)
@@ -491,7 +487,7 @@ def test_sort_skeleton():
     pdb.set_trace()
     print "Fin"
 
-def segment_marks(total_mask, colineal_thresh=15, distance_thresh=350):
+def segment_marks(total_mask, colineal_thresh=15, distance_thresh=2000):
 
     props = measure.regionprops(measure.label(total_mask, connectivity=2), coordinates='xy')
     colineal_points_total = []
@@ -517,22 +513,26 @@ def segment_marks(total_mask, colineal_thresh=15, distance_thresh=350):
                     else:
                         distances.pop()
 
+        #pdb.set_trace()
         final_points = []
-        colineal_points, distances = (list(t) for t in zip(*sorted(zip(colineal_points, distances), key = lambda x: x[1])))
-        final_points.append(colineal_points.pop(0))
-        y1, x1 = props[final_points[0]]["centroid"]
+        if colineal_points:
+            colineal_points, distances = (list(t) for t in zip(*sorted(zip(colineal_points, distances), key = lambda x: x[1])))
+            final_points.append(colineal_points.pop(0))
+            y1, x1 = props[final_points[0]]["centroid"]
 
-        while (len(final_points) != 2) and (len(colineal_points) > 0):
-            y2, x2 = props[colineal_points[0]]["centroid"]
-            dist_2_0 = cdist(np.array([(x0,y0)]), np.array([(x2,y2)]))
-            dist_2_1 = cdist(np.array([(x1,y1)]), np.array([(x2,y2)]))
-            if dist_2_1 > dist_2_0:
-                final_points.append(colineal_points.pop(0))
-            else:
-                colineal_points.pop(0)
+            while (len(final_points) != 2) and (len(colineal_points) > 0):
+                y2, x2 = props[colineal_points[0]]["centroid"]
+                dist_2_0 = cdist(np.array([(x0,y0)]), np.array([(x2,y2)]))
+                dist_2_1 = cdist(np.array([(x1,y1)]), np.array([(x2,y2)]))
+                if dist_2_1 > dist_2_0:
+                    final_points.append(colineal_points.pop(0))
+                else:
+                    colineal_points.pop(0)
 
 
         colineal_points_total.append(final_points)
+
+    print colineal_points_total
 
     lane_endpoints = []
     for idx, _colineal_point in enumerate(colineal_points_total):
@@ -548,18 +548,19 @@ def segment_marks(total_mask, colineal_thresh=15, distance_thresh=350):
         current_idx = endpoint_idx
         next_idx = colineal_points_total[current_idx][0]
         lane_completed = False
-
+        print current_idx
         while not lane_completed:
 
             marks_idx.append(next_idx)
             _next_idx = list(set(colineal_points_total[next_idx]) - set([current_idx]))
-
+            print next_idx
             if _next_idx:
                 current_idx = next_idx
                 next_idx = _next_idx[0]
             else:
                 lane_endpoints.remove(next_idx)
                 lane_completed = True
+                print
 
         if len(marks_idx) > 2:
             lanes.append(marks_idx)
@@ -622,7 +623,6 @@ def segment_one_section(mask, x_dist_thresh=5):
     plt.show()
     x_values_2 = sorted(compute_x_values(mask_2))
 
-    pdb.set_trace()
 
     for i in range(len(x_values_2)-1):
         x_value_1_selected = []
@@ -705,123 +705,123 @@ def detect_br_ep(sk):
     
     return br, ep
 
+if __name__ == "__main__":
 
+    sys.argv.pop(0)
+    coord = tuple(sys.argv)
+    img, mask_download = download_img_mask(coord)
+    mask_download = mask_download[:1200,:]
+    img = img[:1200,:]
 
-img, mask_download = download_img_mask(coord)
-mask_download = mask_download[:1200,:]
-img = img[:1200,:]
+    skeleton = morphology.medial_axis(mask_download == 255)
 
-skeleton = morphology.medial_axis(mask_download == 255)
+    skeleton[0,:] = 0
+    skeleton[-1,:] = 0
+    skeleton[:,0] = 0
+    skeleton[:,-1] = 0
 
-skeleton[0,:] = 0
-skeleton[-1,:] = 0
-skeleton[:,0] = 0
-skeleton[:,-1] = 0
-
-plt.figure()
-plt.imshow(mask_download)
-plt.figure()
-plt.imshow(skeleton)
-plt.figure()
-plt.imshow(img)
-plt.show()
-
-skleton_sections = sort_skeleton(skeleton, img)
-crops = []
-H_list = []
-W_list = []
-mid_points = []
-angles = []
-print ">>>>>>>>>>>>>>>>>>>>>>>>"
-one_section_segmentation = True
-for section in skleton_sections:
-
-    section_mid_points, section_angles, section_height, _angles = divide_skel(section, M=200)
-
-    pdb.set_trace()
-    plt.plot(_angles)
+    plt.figure()
+    plt.imshow(mask_download)
+    plt.figure()
+    plt.imshow(skeleton)
+    plt.figure()
+    plt.imshow(img)
     plt.show()
 
-    if len(section_mid_points) > 1:
-        one_section_segmentation = False
+    skleton_sections = divide_skeleton(skeleton, img)
+    crops = []
+    H_list = []
+    W_list = []
+    mid_points = []
+    angles = []
+    print ">>>>>>>>>>>>>>>>>>>>>>>>"
+    one_section_segmentation = True
+    for section in skleton_sections:
 
-    for index, _ in enumerate(section_mid_points):
+        section_mid_points, section_angles, section_height, _angles = divide_section(section, M=200)
 
-        crop = extract_section(img, section_mid_points[index], section_angles[index], section_height[index])
-        H, W = crop.shape[:2]
-        print section_mid_points[index]
-        print section_angles[index]
-        print
+        if len(section_mid_points) > 1:
+            one_section_segmentation = False
 
-        H_list.append(H)
-        W_list.append(W)
-        crops.append(crop)
-        mid_points.append(section_mid_points[index])
-        angles.append(section_angles[index])
+        for index, _ in enumerate(section_mid_points):
 
-#pdb.set_trace()
+            crop = extract_straight_section(img, section_mid_points[index], section_angles[index], section_height[index])
+            H, W = crop.shape[:2]
+            print section_mid_points[index]
+            print section_angles[index]
+            print
 
-H_max = max(H_list)
-W_max = max(W_list)
+            H_list.append(H)
+            W_list.append(W)
+            crops.append(crop)
+            mid_points.append(section_mid_points[index])
+            angles.append(section_angles[index])
 
-H_pad = H_max + int(ceil(float(H_max) / 32) * 32 - H_max)
-W_pad = W_max + int(ceil(float(W_max) / 32) * 32 - W_max)
+    #pdb.set_trace()
 
-i_class = 0
-with tf.Graph().as_default():
+    H_max = max(H_list)
+    W_max = max(W_list)
 
-    image  = tf.placeholder(tf.float32, shape=[1, H_pad, W_pad, 3], name="input")
-    logits = segnet_TF.segnet_extended(image)
-    init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
-    
-    with tf.Session() as sess:
+    H_pad = H_max + int(ceil(float(H_max) / 32) * 32 - H_max)
+    W_pad = W_max + int(ceil(float(W_max) / 32) * 32 - W_max)
 
-        sess.run(init_op)
+    i_class = 0
+    with tf.Graph().as_default():
 
-        if one_section_segmentation:
-            total_mask = np.zeros(skeleton.shape, dtype=np.uint8)
-        else:
-            total_mask = np.zeros(skeleton.shape).astype(bool)
+        image  = tf.placeholder(tf.float32, shape=[1, H_pad, W_pad, 3], name="input")
+        logits = segnet_TF.segnet_extended(image)
+        init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
+        
+        with tf.Session() as sess:
 
-        for crop, mid_point, angle in zip(crops, mid_points, angles):
-
-            padded_crop, x_pad, y_pad = pad_img(crop, (H_pad, W_pad))
-            padded_crop_ = padded_crop[...,::-1]
-            padded_crop_ = padded_crop_[np.newaxis,:]
-            padded_crop_ = padded_crop_.astype(np.float32)
-            _logits = sess.run(logits, feed_dict={image: padded_crop_})
-            mask = np.argmax(np.squeeze(_logits), axis=-1)
-            mask = mask[y_pad[0]:H_pad-y_pad[-1], x_pad[0]:W_pad-x_pad[1]]
+            sess.run(init_op)
 
             if one_section_segmentation:
-                plt.imshow(mask)
-                plt.show()
-                mask_lanes, num_lanes = segment_one_section(mask)
-
-                for i_lane in range(1, num_lanes+1):
-
-                    i_class += 1
-                    total_mask_ = paste_mask(np.zeros(total_mask.shape).astype(bool), (mask_lanes == i_lane), mid_point, angle)
-                    total_mask_ = binary_fill_holes(total_mask_.astype(int))
-                    total_mask[total_mask_] = i_class
-
+                total_mask = np.zeros(skeleton.shape, dtype=np.uint8)
             else:
-                total_mask = paste_mask(total_mask, (mask == 1), mid_point, angle)
+                total_mask = np.zeros(skeleton.shape).astype(bool)
+
+            for crop, mid_point, angle in zip(crops, mid_points, angles):
+
+                padded_crop, x_pad, y_pad = pad_img(crop, (H_pad, W_pad))
+                padded_crop_ = padded_crop[...,::-1]
+                padded_crop_ = padded_crop_[np.newaxis,:]
+                padded_crop_ = padded_crop_.astype(np.float32)
+                _logits = sess.run(logits, feed_dict={image: padded_crop_})
+                mask = np.argmax(np.squeeze(_logits), axis=-1)
+                mask = mask[y_pad[0]:H_pad-y_pad[-1], x_pad[0]:W_pad-x_pad[1]]
+
+                if one_section_segmentation:
+                    plt.imshow(mask)
+                    plt.show()
+                    mask_lanes, num_lanes = segment_one_section(mask)
+
+                    for i_lane in range(1, num_lanes+1):
+
+                        i_class += 1
+                        total_mask_ = paste_mask(np.zeros(total_mask.shape).astype(bool), (mask_lanes == i_lane), mid_point, angle)
+                        total_mask_ = binary_fill_holes(total_mask_.astype(int))
+                        total_mask[total_mask_] = i_class
+
+                else:
+                    total_mask = paste_mask(total_mask, (mask == 1), mid_point, angle)
 
 
-        if one_section_segmentation:
-            plt.imshow(total_mask)
-            plt.show()
-            vis_img = vis.vis_seg(img, total_mask, vis.make_palette(i_class+1))
-            plt.imshow(vis_img)
-            plt.show()
-        else:
-            total_mask = binary_fill_holes(total_mask.astype(int)).astype(int)
-            total_mask = remove_small_objects(measure.label(total_mask, connectivity=2), min_size=50)
-            new_total_mask, num_lanes = segment_marks(total_mask)
-            vis_img = vis.vis_seg(img, new_total_mask, vis.make_palette(num_lanes+1))
-            plt.imshow(vis_img)
-            plt.show()
+            if one_section_segmentation:
+                plt.imshow(total_mask)
+                plt.show()
+                vis_img = vis.vis_seg(img, total_mask, vis.make_palette(i_class+1))
+                plt.imshow(vis_img)
+                plt.show()
+            else:
+                plt.imshow(total_mask)
+                plt.show()
+                total_mask = binary_fill_holes(total_mask.astype(int)).astype(int)
+                total_mask = remove_small_objects(measure.label(total_mask, connectivity=2), min_size=50)
+                new_total_mask, num_lanes = segment_marks(total_mask)
+                vis_img = vis.vis_seg(img, new_total_mask, vis.make_palette(num_lanes+1))
+                plt.imshow(vis_img)
+                plt.show()
 
 
 
