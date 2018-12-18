@@ -6,6 +6,14 @@ from scipy.spatial.distance import cdist
 import math
 
 def _get_line_coeffs(point, orientation):
+    """
+       Compute the coefficients of a line given a point and the perpendicular direction
+       Args:
+           point:                  point lying on the line
+           orientation:            perpendicular direction to the line
+       Return:
+           line_coeffs:            [A,B,C] coefficients of the general equation of a line
+    """
     x, y = point
     A = math.sin(orientation)
     B = math.cos(orientation)
@@ -13,6 +21,14 @@ def _get_line_coeffs(point, orientation):
     return (A, B, C)
 
 def _get_dist_to_line(line_coeffs, point):
+    """
+       Compute the min distance to a line from a point
+       Args:
+           line_coeffs:            [A,B,C] coefficients of the general equation of a line
+           point:                  point from which to measure distance to line
+       Return:
+           coeffs:                 [A,B,C] coefficients of the general equation of a line
+    """
     x, y = point
     A, B, C = line_coeffs
     dist = abs(A * x + B * y + C)/math.sqrt((A ** 2) + (B ** 2))
@@ -20,6 +36,19 @@ def _get_dist_to_line(line_coeffs, point):
 
 
 def _get_colineal_centroids(prop_idx, props, colineal_thresh=15, distance_thresh=350):
+
+    """
+       Compute all the colinear centroids to an anchor centroid
+       Args:
+           prop_idx:               index of the anchor centroid in the props array
+           props:                  array of props obtained from skimage.measure.regionprops
+           colineal_thresh:        maximum distance to the orientation line for a centroid to be considered colineal
+           distance_thresh:        maximum distance to the anchor centroid to be considered colineal
+
+       Return:
+           colineal_centroids:     list of indices in the props array of the colineal centroids
+           distances:              list of distances of the distances to the anchor centroid
+    """
 
     y0, x0 = props[prop_idx]["centroid"]
     orientation = props[prop_idx]["orientation"]
@@ -41,6 +70,17 @@ def _get_colineal_centroids(prop_idx, props, colineal_thresh=15, distance_thresh
     return colineal_centroids, distances
 
 def _filter_centroids(props, prop_idx, colineal_points, distances):
+    """
+       Filter the colinear centroids so that only remain the adyacent ones
+       Args:
+           props:                  array of props obtained from skimage.measure.regionprops
+           prop_idx:               index of the anchor centroid in the props array
+           colineal_points:        list of indices in the props array of the colineal centroids
+           distances:              maximum distance to the anchor centroid to be considered colineal
+
+       Return:
+           adjacent_centroids:     list of indices of the adyacent centroids to the anchor centroid
+    """
 
     adjacent_centroids = []
 
@@ -64,8 +104,13 @@ def _filter_centroids(props, prop_idx, colineal_points, distances):
     return adjacent_centroids
 
 def _get_centroids_groups(adjacent_centroids_list):
-
-    print adjacent_centroids_list
+    """
+       Walks the adyacent_centroids_list starting from the endpoints to obtain the centroid groups
+       Args:
+           adjacent_centroids_list:     list of tuples with the indices of the adyacent centroids of each centroid
+       Return:
+           centroid_groups:             list of groups of centroids, havings each group two endpoints
+    """
 
     endpoints = []
     for idx, adjacent_centroids in enumerate(adjacent_centroids_list):
@@ -81,12 +126,12 @@ def _get_centroids_groups(adjacent_centroids_list):
         current_idx = endpoint_idx
         next_idx = adjacent_centroids_list[current_idx][0]
         lane_completed = False
-        print current_idx
+        
         while not lane_completed:
 
             centroids_idx.append(next_idx)
             _next_idx = list(set(adjacent_centroids_list[next_idx]) - set([current_idx]))
-            print next_idx
+            
             if _next_idx:
                 current_idx = next_idx
                 next_idx = _next_idx[0]
@@ -101,7 +146,15 @@ def _get_centroids_groups(adjacent_centroids_list):
     return centroid_groups
 
 
-def group_marks(total_mask, colineal_thresh=15, distance_thresh=350):
+def group_marks(total_mask):
+    """
+       Groups the inner lines so that each group is a lane limit
+       Args:
+           total_mask:                  bool mask of inner lines on the aerial image coordinate system
+       Return:
+           new_total_mask:              integer mask where each integer is associated to a group
+           num_groups:                  number of groups in the mask
+    """
 
     props = measure.regionprops(measure.label(total_mask, connectivity=2), coordinates='xy')
     adjacent_centroids_list = []

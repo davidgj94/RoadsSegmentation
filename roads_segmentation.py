@@ -21,12 +21,17 @@ if __name__ == "__main__":
     sys.argv.pop(0)
     coord = tuple(sys.argv)
 
+    #Download the aerial image and mask from Google Maps
     img, mask_download = utils.download_img_mask(coord)
+
+    #Remove the Google icon of the bottom of the image
     mask_download = mask_download[:1200,:]
     img = img[:1200,:]
 
+    #Compute de Medial-axis skeleton of the mask
     skeleton = morphology.medial_axis(mask_download == 255)
 
+    #Remove imperfections of the skeleton on the image border
     skeleton[0,:] = 0
     skeleton[-1,:] = 0
     skeleton[:,0] = 0
@@ -40,6 +45,7 @@ if __name__ == "__main__":
     plt.imshow(img)
     plt.show()
 
+    #Divide the skeleton in disjointed sections
     skleton_sections = utils.divide_skeleton(skeleton, img)
 
     crops = []
@@ -49,6 +55,7 @@ if __name__ == "__main__":
     angles = []
     one_section_segmentation = True
 
+    #Divide each section in straight sections
     for section in skleton_sections:
 
         section_mid_points, section_angles, section_height, _angles = utils.divide_section(section, M=200)
@@ -56,6 +63,7 @@ if __name__ == "__main__":
         if len(section_mid_points) > 1:
             one_section_segmentation = False
 
+        #Extract bounding-boxes from the aerial image
         for index, _ in enumerate(section_mid_points):
 
             crop = utils.extract_straight_section(img, section_mid_points[index], section_angles[index], section_height[index])
@@ -70,6 +78,7 @@ if __name__ == "__main__":
     H_max = max(H_list)
     W_max = max(W_list)
 
+    #Compute de H_pad height and  W_pad width of the images after being padded so that H_pad and W_pad are both multiples of 32 (required for the Segnet architecture)
     H_pad = H_max + int(ceil(float(H_max) / 32) * 32 - H_max)
     W_pad = W_max + int(ceil(float(W_max) / 32) * 32 - W_max)
 
@@ -78,6 +87,7 @@ if __name__ == "__main__":
 
     with tf.Graph().as_default():
 
+        #Define the computational graph
         image  = tf.placeholder(tf.float32, shape=[1, H_pad, W_pad, 3], name="input")
         logits = segnet_TF.segnet_extended(image)
         init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
@@ -93,18 +103,22 @@ if __name__ == "__main__":
 
             for crop, mid_point, angle in zip(crops, mid_points, angles):
 
+                #Pad the bounding-box so that its new dimensions are (H_pad,W_pad,3)
                 padded_crop, x_pad, y_pad = utils.pad_img(crop, (H_pad, W_pad))
+
+                #Convert the RGB image to BGR
                 padded_crop_ = padded_crop[...,::-1]
                 padded_crop_ = padded_crop_[np.newaxis,:]
                 padded_crop_ = padded_crop_.astype(np.float32)
 
                 _logits = sess.run(logits, feed_dict={image: padded_crop_})
-
+                #Obtain the clas of each pizel from the logits
                 mask = np.argmax(np.squeeze(_logits), axis=-1)
+                #Remove padding from the mask
                 mask = mask[y_pad[0]:H_pad-y_pad[-1], x_pad[0]:W_pad-x_pad[1]]
 
                 if one_section_segmentation:
-                
+                    #If there isn't too much curvature then segment the lanes on the road and then transform each mask to the aerial image coordinate system
                     mask_lanes, num_lanes = segment_lanes(mask)
 
                     for i_lane in range(1, num_lanes+1):
@@ -115,7 +129,7 @@ if __name__ == "__main__":
                         total_mask[total_mask_] = i_class
 
                 else:
-
+                    #If there is too much curvature then transform each inner line mask to the aerial image coordinate system so as to group the inner lines later
                     total_mask = utils.paste_mask(total_mask, (mask == 1), mid_point, angle)
 
 

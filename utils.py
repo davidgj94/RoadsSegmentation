@@ -58,13 +58,20 @@ satellite_URL = "https://maps.googleapis.com/maps/api/staticmap?maptype=satellit
 
 
 def download_img_mask(coord):
+    """
+       Download an aerial image and a road mask from Google Maps
+       Args:
+           coord:            GPS coordinates of the road
+       Return:
+           img:              RGB aerial image
+           mask:             binary mask (255, road), (0, background)
+    """
     
     new_url = base_URL + "&center=" + quote("{}, {}".format(*coord))
     new_satellite_url = satellite_URL + "&center=" + quote("{}, {}".format(*coord))
     
     url = urllib2.urlopen(new_url)
     f = io.BytesIO(url.read())
-    #pdb.set_trace()
     mask = exposure.rescale_intensity(np.array(Image.open(f)))
     mask[mask != 255] = 0
     img = skimage.io.imread(new_satellite_url)
@@ -94,6 +101,13 @@ def _get_midpoint(p1, p2):
     return y_midpoint, x_midpoint
 
 def get_padding(sz, sz_):
+    """
+       Compute the amount of padding nedded
+       Args:
+           sz:               input size (height or width, not both)
+       Return:
+           padding:          amount of padding to add
+    """
     
     pad_amount = sz_ - sz
     
@@ -105,7 +119,17 @@ def get_padding(sz, sz_):
     return padding
 
 def pad_img(img, sz, pad_value=0):
-
+    """
+       Pad an image so that its new size is sz
+       Args:
+           img:              image to pad
+           sz:               size of the padded image
+           pad_value:        value os the padding pixels
+       Return:
+           img_padded:       paddded image
+           x_pad:            tuple containing the padding on the left(index 0) and the right(index 1) sides
+           y_pad:            tuple containing the padding on the top(index 0) and the bottom(index 1) sides
+    """
     H, W = sz
     height, width = img.shape[:2]
     x_pad = get_padding(width, W)
@@ -171,8 +195,21 @@ def find_intesect_borders(line_coeffs, sz):
 
     return intersect_points
 
-def divide_section(coords, D=200, M=200, thresh=5, min_height=100):
-    
+def divide_section(coords, D=100, M=100, thresh=5, min_height=100):
+    """
+       Divide a skeleton section in several straight subsections
+       Args:
+           coords:           sorted coords of the section
+           D:                step when computing the angle
+           M:                half the separation of the points used to cimpute the angle
+           thresh:           threshold when computing the ends of each section
+           min_height:       min_height of the straight section
+       Return:
+           section_mid_points:   center of each straight section
+           section_angles:       orientation of each straight section
+           section_height:       height of each straight section
+           angles:               angle of curvature on each point of the skeleton section
+    """
     ref_index = 0
     angles = []
     sections_start = [coords[M]]
@@ -205,7 +242,17 @@ def divide_section(coords, D=200, M=200, thresh=5, min_height=100):
     return section_mid_points, section_angles, section_height, angles
 
 def extract_straight_section(img, center, angle, height, width=200):
-    
+    """
+       Extract a bounding-box from the aerial image
+       Args:
+           img:           aerial image
+           center:        center of the bounding box
+           angle:         angle of orientation of the bounding box
+           height:        height of the bounding box
+           width:         width of the bounding box
+       Return:
+           crop:          bounding box
+    """
     img_h, img_w = img.shape[:2]
     M = cv2.getRotationMatrix2D(center[::-1], angle - 90, 1.0)
     rotated = cv2.warpAffine(img, M, (img_h, img_w), cv2.INTER_NEAREST)
@@ -232,7 +279,17 @@ def extract_straight_section(img, center, angle, height, width=200):
     return crop
 
 def paste_mask(total_mask, mask, center, angle):
-    
+    """
+       Given a binary mask in a bounding box coordinate system, transform the foreground pixels coordinates to the aerial image coordinate system
+       and place them in total_mask
+       Args:
+           total_mask:    mask in the aerial image coordinate system
+           mask:          mask in the bounding box coordinates
+           center:        center of the bounding box in the aerial image coordinate system
+           angle:         angle of the bounding box in the aerial image coordinate system
+       Return:
+           total_mask:    modified version of total_mask
+    """
     H, W = mask.shape
     y, x = np.where(mask)
     y += center[0] - H / 2
@@ -245,7 +302,15 @@ def paste_mask(total_mask, mask, center, angle):
     
 
 def _get_next_point(skel, current_point, prev_point=None):
-    
+    """
+       Search for the next point in a 8-connectivity neighborhood
+       Args:
+           skel:             skel section
+           current_point:    current point in the global coordinate system
+           prev_point:       prev_point in the 8-connectivity neighborhood coordinate system
+       Return:
+           next_point:       closest point to the current point excluding previous point
+    """
     upper_limit = current_point[0]-1
     bottom_limit = current_point[0]+1
     left_limit = current_point[1]-1
@@ -265,8 +330,16 @@ def _get_next_point(skel, current_point, prev_point=None):
     
     return next_point
     
-def divide_skeleton(skel, img, min_num_points=500):
-
+def divide_skeleton(skel, min_num_points=500):
+    """
+       Divide a skeleton in disjointed sections and return a sorted list of theircoordinates
+       Args:
+           skel:             skeleton
+           min_num_points:   min number of points for a section to be considered
+           prev_point:       prev_point in the 8-connectivity neighborhood coordinate system
+       Return:
+           sorted_coord_labels:    list containing the sorted coordinates of each section
+    """
     br_mask = np.zeros(skel.shape, dtype=np.uint8)
     br, ep = detect_br_ep(skel)
 
@@ -276,15 +349,6 @@ def divide_skeleton(skel, img, min_num_points=500):
         br_mask[br_y-1:(br_y+1)+1, br_x-1:(br_x+1)+1] = 1
     skel[br_mask.astype(bool)] = False
 
-    # plt.figure()
-    # plt.imshow(skel)
-    # skel_labeled, num_labels = measure.label(skel, connectivity=2, return_num=True)
-    # for i in range(num_labels):
-    #     skel_cc = (skel_labeled == (i+1))
-    #     plt.figure()
-    #     plt.imshow(skel_cc)
-    # plt.show()
-    
     skel_labeled, num_labels = measure.label(skel, connectivity=2, return_num=True)
 
     sorted_coord_labels = []
@@ -292,28 +356,16 @@ def divide_skeleton(skel, img, min_num_points=500):
     for i in range(num_labels):
         
         skel_cc = (skel_labeled == (i+1))
-
         
-        if len(np.where(skel_cc)[0]) < min_num_points:
+        num_points_section  = int(len(np.where(skel_cc)[0]))
+        
+        if num_points_section < 500:
             continue
         
         br, ep = detect_br_ep(skel_cc)
         ep_y, ep_x = np.where(ep)
         br_y, br_x = np.where(br)
         ep_coords = zip(ep_y, ep_x)
-
-        # ep_coords_ = zip(ep_x, ep_y)
-        # br_coords = zip(br_x, br_y)
-
-        # fig, ax = plt.subplots(1)
-        # ax.imshow(skel_cc)
-        # for ep_i in range(len(ep_coords_)):
-        #     ax.add_patch(Circle(ep_coords_[ep_i], 10, color='k'))
-
-        # for br_i in range(len(br_coords)):
-        #     ax.add_patch(Circle(br_coords[br_i], 10, color='r'))
-
-        # plt.show()
         
         sorted_coord = []
         sorted_coord.append(ep_coords[0])
@@ -331,148 +383,6 @@ def divide_skeleton(skel, img, min_num_points=500):
             sorted_coord.append(next_point)
 
         sorted_coord_labels.append(sorted_coord)
-
-        # section_mid_points, section_angles, section_height, angles = divide_skel(sorted_coord)
-
-    #     for index, _ in enumerate(section_mid_points):
-    #         crop = extract_section(img, section_mid_points[index], section_angles[index], section_height[index])
-    #         plt.figure()
-    #         plt.imshow(crop)
-    # plt.show()
-
-        
-        # total_mask = np.zeros(img.shape).astype(bool)
-        # total_mask = total_mask[...,0]
-        # for index, _ in enumerate(section_mid_points):
-        #     crop = extract_section(img, section_mid_points[index], section_angles[index], section_height[index])
-        #     crop, pad_x, pad_y = pad_img(crop, (384, 224))
-        #     mask = road_segmentation(crop)
-        #     mask = mask[pad_y[0]:384-pad_y[1], pad_x[0]:224-pad_x[1]]
-        #     mask = (mask == 1)
-        #     total_mask = paste_mask(total_mask, mask, section_mid_points[index], section_angles[index])
-        #     # pdb.set_trace()
-        # total_mask = binary_fill_holes(total_mask.astype(int)).astype(int)
-        # total_mask = remove_small_objects(measure.label(total_mask, connectivity=2), min_size=100)
-        # total_mask = (total_mask > 0).astype(np.uint8)
-
-
-        # vis_img = vis.vis_seg(img, total_mask, np.array([[255,255,255],[0, 0, 255],[0, 255, 0]]))
-        # plt.imshow(vis_img)
-        # plt.show()
-        # #pdb.set_trace()
-
-        # # toltal_mask = binary_fill_holes(toltal_mask.astype(int)).astype(int)
-        # # toltal_mask = remove_small_objects(measure.label(toltal_mask, connectivity=2), min_size=100)
-        # # toltal_mask = (toltal_mask > 0).astype(np.uint8)
-        # props = measure.regionprops(measure.label(total_mask, connectivity=2), coordinates='xy')
-
-        # colineal_thresh = 15
-        # distance_thresh = 350
-        # colineal_points_total = []
-        # from PIL import Image, ImageDraw
-
-        # for prop_idx in range(len(props)):
-        #     y0, x0 = props[prop_idx]["centroid"]
-        #     orientation = props[prop_idx]["orientation"]
-        #     line_coeffs = get_line_coeffs((x0, y0), orientation)
-        #     # intersect_points = find_intesect_borders(line_coeffs, toltal_mask.shape)
-        #     # im = Image.fromarray(toltal_mask)
-        #     # draw = ImageDraw.Draw(im) 
-        #     # draw.line([intersect_points[0], intersect_points[1]], fill=1, width=5)
-        #     # plt.imshow(np.array(im))
-        #     # plt.show()
-        #     colineal_points = []
-        #     distances = []
-        #     for _prop_idx in range(len(props)):
-        #         if _prop_idx != prop_idx:
-        #             _y0, _x0 = props[_prop_idx]["centroid"]
-        #             print get_dist_to_line(line_coeffs, (_x0, _y0))
-        #             print cdist(np.array([(x0,y0)]), np.array([(_x0,_y0)]))
-        #             print _prop_idx
-
-        #             if get_dist_to_line(line_coeffs, (_x0, _y0)) < colineal_thresh:
-        #                 distances.append(cdist(np.array([(x0,y0)]), np.array([(_x0,_y0)])))
-        #                 if distances[-1] < distance_thresh:
-        #                     colineal_points.append(_prop_idx)
-        #                 else:
-        #                     distances.pop()
-    
-        #     final_points = []
-
-        #     colineal_points, distances = (list(t) for t in zip(*sorted(zip(colineal_points, distances), key = lambda x: x[1])))
-        #     #pdb.set_trace()
-        #     final_points.append(colineal_points.pop(0))
-        #     y1, x1 = props[final_points[0]]["centroid"]
-
-        #     while (len(final_points) != 2) and (len(colineal_points) > 0):
-        #         y2, x2 = props[colineal_points[0]]["centroid"]
-        #         dist_2_0 = cdist(np.array([(x0,y0)]), np.array([(x2,y2)]))
-        #         dist_2_1 = cdist(np.array([(x1,y1)]), np.array([(x2,y2)]))
-        #         if dist_2_1 > dist_2_0:
-        #             final_points.append(colineal_points.pop(0))
-        #         else:
-        #             colineal_points.pop(0)
-
-
-        #     colineal_points_total.append(final_points)
-
-        # lane_endpoints = []
-        # for idx, _colineal_point in enumerate(colineal_points_total):
-        #     if len(_colineal_point) == 1:
-        #         lane_endpoints.append(idx)
-
-        # lanes = []
-        # while lane_endpoints:
-
-        #     marks_idx = []
-        #     endpoint_idx = lane_endpoints.pop(0)
-        #     marks_idx.append(endpoint_idx)
-        #     current_idx = endpoint_idx
-        #     next_idx = colineal_points_total[current_idx][0]
-        #     lane_completed = False
-
-        #     while not lane_completed:
-
-        #         marks_idx.append(next_idx)
-        #         _next_idx = list(set(colineal_points_total[next_idx]) - set([current_idx]))
-
-        #         if _next_idx:
-        #             current_idx = next_idx
-        #             next_idx = _next_idx[0]
-        #         else:
-        #             lane_endpoints.remove(next_idx)
-        #             lane_completed = True
-
-        #     lanes.append(marks_idx)
-
-        # total_mask_labeled = measure.label(total_mask, connectivity=2)
-        # new_total_mask = np.zeros(total_mask.shape, dtype=np.uint8)
-        # for lane_idx in range(len(lanes)):
-        #     for mark_idx in lanes[lane_idx]:
-        #         new_total_mask[total_mask_labeled == props[mark_idx]["label"]] = (lane_idx + 1)
-
-        # plt.imshow(new_total_mask)
-        # plt.show()
-
-
-
-
-        # for prop_idx in range(len(props)):
-
-        #     fig, ax = plt.subplots(1)
-        #     ax.imshow(total_mask)
-
-        #     y0, x0 = props[prop_idx]["centroid"]
-        #     circle = Circle((x0, y0), 10, color='r')
-        #     ax.add_patch(circle)
-
-        #     for colineal_idx in range(len(colineal_points_total[prop_idx])):
-        #         _prop_idx = colineal_points_total[prop_idx][colineal_idx]
-        #         y0, x0 = props[_prop_idx]["centroid"]
-        #         circle = Circle((x0, y0), 10, color='k')
-        #         ax.add_patch(circle)
-
-        #     plt.show()
         
     return sorted_coord_labels
 
@@ -659,7 +569,15 @@ def segment_one_section(mask, x_dist_thresh=5):
 
 
 def detect_br_ep(sk):
-    
+    """
+       Detect branches and endpoints in a skeleton by using the hit-or-miss algorithm
+       Args:
+           sk:             skeleton
+       Return:
+           br:             branches mask
+           ep:             endpoints mask
+
+    """
     branch1=np.array([[2, 1, 2], [1, 1, 1], [2, 2, 2]])
     branch2=np.array([[1, 2, 1], [2, 1, 2], [1, 2, 1]])
     branch3=np.array([[1, 2, 1], [2, 1, 2], [1, 2, 2]])
