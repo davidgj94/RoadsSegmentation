@@ -1,0 +1,7 @@
+numpy
+scikit-image==0.14
+Pillow
+matplotlib
+scipy
+mahotas
+tensorflow-gpu==1.6.0
