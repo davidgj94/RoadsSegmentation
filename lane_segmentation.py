@@ -21,11 +21,9 @@ def _compute_x_values(mask, min_objects=1, x_dist_thresh=5):
             for _idx in props_idx:
                 if _idx != idx:
                     _y0, _x0 = props[_idx]["centroid"]
-                    print abs(x0 - _x0)
                     if abs(x0 - _x0) < x_dist_thresh:
                         colineal_idxs.append(_idx)
                         colineal_x0s = [_x0]
-                print 
             for colineal_idx in colineal_idxs:
                 props_idx.remove(colineal_idx)
 
@@ -60,13 +58,43 @@ def segment_lanes(mask):
     x_values_1 = _compute_x_values(mask_1, min_objects=2)
     x_values_1 = sorted(x_values_1)
 
+    #figures figura fases segmentacion
+    # mask_figure = np.zeros(mask.shape,dtype=np.uint8)
+    # mask_figure[mask_1] = 1
+    # for _x_value in x_values_1:
+    #     mask_figure[:, _x_value]= 2
+    # plt.figure()
+    # plt.imshow(mask_figure)
+
+
     mask_2 = (mask == 2)
     mask_2 = binary_fill_holes(mask_2.astype(int)).astype(int)
     mask_2 = (remove_small_objects(measure.label(mask_2, connectivity=2), min_size=50) > 0)
     x_values_2 = _compute_x_values(mask_2)
     x_values_2 = sorted(x_values_2)
 
+    #figures figura fases segmentacion
+    # mask_figure1 = np.zeros(mask.shape,dtype=np.uint8)
+    # mask_figure1[mask_2] = 1
+    # for _x_value in x_values_2:
+    #     mask_figure1[:, _x_value]= 2
+    # plt.figure()
+    # plt.imshow(mask_figure1)
+
     lane_limits = _filter_x_values(x_values_1, x_values_2)
+
+    #figures figura fases segmentacion
+    # mask_figure2 = np.zeros(mask.shape,dtype=np.uint8)
+    # mask_figure2[mask_1] = 1
+    # mask_figure2[mask_2] = 2
+    # mask_figure2[:, lane_limits[1]] = 3
+    # for _x_value in lane_limits[1:-1]:
+    #     mask_figure2[:, _x_value]= 4
+    # mask_figure2[:, lane_limits[-1]] = 3
+    # plt.figure()
+    # plt.imshow(mask_figure2)
+    # plt.show()
+
 
     lanes_mask = np.zeros(mask.shape, dtype=np.uint8)
     for i in range(len(lane_limits)-1):

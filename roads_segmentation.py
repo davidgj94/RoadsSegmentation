@@ -15,13 +15,26 @@ import vis
 from skimage.morphology import remove_small_objects
 import tensorflow as tf
 import segnet_TF
+from PIL import Image
+import argparse
+import os.path
+import cv2
+import os
+import shutil
+
+
+def make_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--coords', type=float, required=True, nargs=2)
+    parser.add_argument('--save_dir', type=str)
+    return parser
+
 
 if __name__ == "__main__":
 
-    sys.argv.pop(0)
-    coord = tuple(sys.argv)
+    args = make_parser().parse_args()
 
-    img, mask_download = utils.download_img_mask(coord)
+    img, mask_download = utils.download_img_mask(tuple(args.coords))
     mask_download = mask_download[:1200,:]
     img = img[:1200,:]
 
@@ -31,14 +44,6 @@ if __name__ == "__main__":
     skeleton[-1,:] = 0
     skeleton[:,0] = 0
     skeleton[:,-1] = 0
-
-    plt.figure()
-    plt.imshow(mask_download)
-    plt.figure()
-    plt.imshow(skeleton)
-    plt.figure()
-    plt.imshow(img)
-    plt.show()
 
     skleton_sections = utils.divide_skeleton(skeleton, img)
 
@@ -120,16 +125,22 @@ if __name__ == "__main__":
 
 
             if one_section_segmentation:
-                plt.imshow(total_mask)
-                plt.show()
                 vis_img = vis.vis_seg(img, total_mask, vis.make_palette(i_class+1))
-                plt.imshow(vis_img)
-                plt.show()
             else:
                 total_mask = binary_fill_holes(total_mask.astype(int)).astype(int)
                 total_mask = remove_small_objects(measure.label(total_mask, connectivity=2), min_size=50)
                 new_total_mask, num_lanes = group_marks(total_mask)
                 vis_img = vis.vis_seg(img, new_total_mask, vis.make_palette(num_lanes+1))
+
+            if args.save_dir:
+                new_save_dir = os.path.join(args.save_dir,"{}_{}".format(*tuple(args.coords)))
+                if os.path.exists(new_save_dir):
+                    shutil.rmtree(new_save_dir, ignore_errors=True)
+                os.mkdir(new_save_dir)
+                cv2.imwrite(os.path.join(new_save_dir, "mask.png"), total_mask)
+                cv2.imwrite(os.path.join(new_save_dir, "img.png"), img[...,::-1])
+                cv2.imwrite(os.path.join(new_save_dir, "vis_img.png"), vis_img[...,::-1])
+            else:
                 plt.imshow(vis_img)
                 plt.show()
 

@@ -1,0 +1,11 @@
+39.711714 -3.495904     bien endpoint bien
+39.707399 -3.496978     bien endpoint bien
+39.703789 -3.497937     bien
+39.604926 -3.525346     mal endpoint mal
+39.603925 -3.525365     mal endpoint mal
+39.468116 -3.517370     bien
+39.373812 -3.494750     señal de trafico lo jode
+38.992653 -3.388855     mal lane_limits vacio, carretera muy clara
+38.806709 -3.396003     bien
+40.100111 -3.634229     bien
+40.012707 -3.631786     bien
